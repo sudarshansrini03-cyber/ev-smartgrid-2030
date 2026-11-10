@@ -1,0 +1,1397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EV SmartGrid 2030 – Control Center</title>
+  <style>
+    /* ═══════════════════════════════════════════════
+       RESET & BASE
+    ═══════════════════════════════════════════════ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --navy:   #0e1b30;
+      --navy2:  #132240;
+      --bg:     #f4f7fb;
+      --white:  #ffffff;
+      --border: #e1e7ef;
+      --green:  #00d7b0;
+      --green2: #41b991;
+      --yellow: #f5b62e;
+      --blue:   #6172dc;
+      --red:    #ef4444;
+      --text:   #1a2535;
+      --muted:  #6b7a99;
+      --radius: 14px;
+      --shadow: 0 2px 16px rgba(14,27,48,.08);
+      --card-shadow: 0 4px 24px rgba(14,27,48,.10);
+      --transition: .22s cubic-bezier(.4,0,.2,1);
+    }
+
+    html, body { height: 100%; font-family: 'Segoe UI', Arial, Helvetica, sans-serif; }
+    body { display: flex; background: var(--bg); color: var(--text); overflow: hidden; }
+
+    /* ═══════════════════════════════════════════════
+       SIDEBAR
+    ═══════════════════════════════════════════════ */
+    #sidebar {
+      width: 240px; min-height: 100vh; background: var(--navy);
+      display: flex; flex-direction: column;
+      position: fixed; left: 0; top: 0; bottom: 0; z-index: 100;
+      box-shadow: 4px 0 24px rgba(0,0,0,.18);
+      transition: width var(--transition);
+    }
+
+    .sidebar-logo {
+      padding: 28px 20px 22px;
+      border-bottom: 1px solid rgba(255,255,255,.07);
+    }
+    .sidebar-logo .logo-icon {
+      width: 44px; height: 44px; border-radius: 12px;
+      background: linear-gradient(135deg,var(--green),var(--blue));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; margin-bottom: 10px;
+      box-shadow: 0 4px 16px rgba(0,215,176,.3);
+    }
+    .sidebar-logo h2 {
+      color: #fff; font-size: 15px; font-weight: 700; letter-spacing: .3px;
+      line-height: 1.3;
+    }
+    .sidebar-logo span {
+      color: var(--green); font-size: 11px; font-weight: 600; letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+
+    .sidebar-nav { flex: 1; padding: 18px 12px; display: flex; flex-direction: column; gap: 4px; }
+
+    .nav-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 11px 14px; border-radius: 10px;
+      color: rgba(255,255,255,.55); font-size: 13.5px; font-weight: 500;
+      cursor: pointer; transition: all var(--transition); border: none;
+      background: transparent; width: 100%; text-align: left;
+      position: relative; overflow: hidden;
+    }
+    .nav-item:hover { color: #fff; background: rgba(255,255,255,.07); }
+    .nav-item.active {
+      color: #fff; background: linear-gradient(90deg,rgba(0,215,176,.18),rgba(97,114,220,.12));
+      border-left: 3px solid var(--green);
+    }
+    .nav-item.active .nav-icon { color: var(--green); }
+    .nav-icon { font-size: 17px; min-width: 20px; text-align: center; }
+
+    .sidebar-footer {
+      padding: 16px 20px; border-top: 1px solid rgba(255,255,255,.07);
+      color: rgba(255,255,255,.35); font-size: 11px;
+    }
+    .online-dot {
+      display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+      background: var(--green); margin-right: 6px;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%,100% { opacity: 1; transform: scale(1); }
+      50%      { opacity: .5; transform: scale(1.3); }
+    }
+
+    /* ═══════════════════════════════════════════════
+       MAIN CONTENT
+    ═══════════════════════════════════════════════ */
+    #main {
+      margin-left: 240px; flex: 1; display: flex; flex-direction: column;
+      min-height: 100vh; overflow-y: auto;
+    }
+
+    /* ─── PAGE SHELL ─── */
+    .page { display: none; padding: 32px; animation: fadeIn .3s ease; }
+    .page.active { display: block; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+
+    /* ─── SECTION HEADER ─── */
+    .page-header { margin-bottom: 28px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+    .page-header h1 { font-size: 24px; font-weight: 700; color: var(--text); }
+    .page-header p  { color: var(--muted); font-size: 14px; margin-top: 4px; }
+
+    /* ─── CARD BASE ─── */
+    .card {
+      background: var(--white); border: 1px solid var(--border);
+      border-radius: var(--radius); box-shadow: var(--card-shadow);
+      padding: 22px;
+    }
+    .card-title { font-size: 14px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .7px; margin-bottom: 16px; }
+
+    /* ─── BUTTONS ─── */
+    .btn {
+      padding: 10px 20px; border-radius: 9px; border: none;
+      font-size: 13.5px; font-weight: 600; cursor: pointer;
+      transition: all var(--transition); display: inline-flex; align-items: center; gap: 7px;
+    }
+    .btn-primary { background: var(--green); color: #fff; }
+    .btn-primary:hover { background: var(--green2); transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0,215,176,.35); }
+    .btn-blue   { background: var(--blue); color: #fff; }
+    .btn-blue:hover { filter: brightness(1.1); transform: translateY(-1px); box-shadow: 0 6px 20px rgba(97,114,220,.35); }
+    .btn-yellow { background: var(--yellow); color: #fff; }
+    .btn-yellow:hover { filter: brightness(1.08); }
+    .btn-red    { background: var(--red); color: #fff; }
+    .btn-red:hover { filter: brightness(1.08); }
+    .btn-outline {
+      background: transparent; border: 1.5px solid var(--border);
+      color: var(--text);
+    }
+    .btn-outline:hover { border-color: var(--green); color: var(--green); }
+    .btn-sm { padding: 7px 14px; font-size: 12px; border-radius: 7px; }
+
+    /* ─── BADGE / STATUS ─── */
+    .badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 10px; border-radius: 50px; font-size: 11.5px; font-weight: 600;
+    }
+    .badge-green  { background: rgba(0,215,176,.12); color: var(--green2); }
+    .badge-yellow { background: rgba(245,182,46,.14); color: #c8900f; }
+    .badge-blue   { background: rgba(97,114,220,.12); color: var(--blue); }
+    .badge-red    { background: rgba(239,68,68,.12); color: var(--red); }
+    .badge-grey   { background: rgba(107,122,153,.12); color: var(--muted); }
+
+    /* ─── GRID HELPERS ─── */
+    .grid-2 { display: grid; grid-template-columns: repeat(2,1fr); gap: 20px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 20px; }
+
+    /* ─── PROGRESS BAR ─── */
+    .progress-wrap { margin-bottom: 14px; }
+    .progress-label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; }
+    .progress-label span:first-child { font-weight: 600; color: var(--text); }
+    .progress-label span:last-child  { font-weight: 700; color: var(--muted); }
+    .progress-track {
+      height: 10px; border-radius: 50px; background: rgba(0,0,0,.07); overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%; border-radius: 50px; transition: width .6s cubic-bezier(.4,0,.2,1);
+      position: relative; overflow: hidden;
+    }
+    .progress-fill::after {
+      content: ''; position: absolute; inset: 0;
+      background: linear-gradient(90deg,transparent 0%,rgba(255,255,255,.3) 50%,transparent 100%);
+      animation: shimmer 2.4s infinite;
+    }
+    @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(200%); } }
+    .pf-green  { background: linear-gradient(90deg,var(--green),var(--green2)); }
+    .pf-yellow { background: linear-gradient(90deg,var(--yellow),#f4a30c); }
+    .pf-blue   { background: linear-gradient(90deg,var(--blue),#8993e8); }
+    .pf-red    { background: linear-gradient(90deg,#f97316,var(--red)); }
+
+    /* ═══════════════════════════════════════════════
+       TOAST NOTIFICATIONS
+    ═══════════════════════════════════════════════ */
+    #toast-container {
+      position: fixed; top: 24px; right: 24px; z-index: 9999;
+      display: flex; flex-direction: column; gap: 10px; pointer-events: none;
+    }
+    .toast {
+      background: var(--navy); color: #fff; border-radius: 10px;
+      padding: 14px 18px; font-size: 13.5px; font-weight: 500;
+      box-shadow: 0 8px 32px rgba(0,0,0,.28);
+      display: flex; align-items: center; gap: 10px; min-width: 280px;
+      animation: toastIn .3s ease; pointer-events: all;
+      border-left: 4px solid var(--green);
+    }
+    .toast.error   { border-color: var(--red); }
+    .toast.warning { border-color: var(--yellow); }
+    @keyframes toastIn  { from { opacity:0; transform: translateX(60px); } to { opacity:1; transform:none; } }
+    @keyframes toastOut { from { opacity:1; transform:none; } to { opacity:0; transform: translateX(60px); } }
+    .toast.hiding { animation: toastOut .3s ease forwards; }
+
+    /* ══════════════════════════════════════════════
+       PAGE 1 — DASHBOARD
+    ══════════════════════════════════════════════ */
+    .stat-card {
+      background: var(--white); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 22px;
+      box-shadow: var(--card-shadow); position: relative; overflow: hidden;
+      transition: transform var(--transition), box-shadow var(--transition);
+    }
+    .stat-card:hover { transform: translateY(-3px); box-shadow: 0 8px 32px rgba(14,27,48,.14); }
+    .stat-card::before {
+      content: ''; position: absolute; top: 0; right: 0;
+      width: 80px; height: 80px; border-radius: 50%;
+      transform: translate(30px,-30px); opacity: .08;
+    }
+    .stat-card.green::before { background: var(--green); }
+    .stat-card.yellow::before { background: var(--yellow); }
+    .stat-card.blue::before  { background: var(--blue); }
+    .stat-card.red::before   { background: var(--red); }
+
+    .stat-label { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+    .stat-value { font-size: 32px; font-weight: 800; margin: 6px 0 2px; line-height: 1; }
+    .stat-value.green  { color: var(--green2); }
+    .stat-value.yellow { color: #c8900f; }
+    .stat-value.blue   { color: var(--blue); }
+    .stat-value.red    { color: var(--red); }
+    .stat-delta { font-size: 12px; color: var(--muted); }
+    .stat-icon  { position: absolute; top: 20px; right: 20px; font-size: 28px; opacity: .2; }
+
+    /* AI Recommendation Cards */
+    .rec-card {
+      background: linear-gradient(135deg,rgba(0,215,176,.06),rgba(97,114,220,.06));
+      border: 1px solid rgba(0,215,176,.2); border-radius: 11px;
+      padding: 15px 18px; cursor: pointer;
+      transition: all var(--transition); display: flex; align-items: flex-start; gap: 12px;
+    }
+    .rec-card:hover { background: linear-gradient(135deg,rgba(0,215,176,.12),rgba(97,114,220,.1)); transform: translateY(-2px); }
+    .rec-card .rec-icon { font-size: 22px; }
+    .rec-card .rec-title { font-size: 13.5px; font-weight: 700; color: var(--text); }
+    .rec-card .rec-desc  { font-size: 12px; color: var(--muted); margin-top: 3px; }
+    .rec-card .rec-gain  { font-size: 11.5px; font-weight: 700; color: var(--green2); margin-top: 5px; }
+
+    /* ══════════════════════════════════════════════
+       PAGE 2 — EV VEHICLES
+    ══════════════════════════════════════════════ */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    thead th {
+      background: rgba(14,27,48,.04); padding: 12px 16px;
+      text-align: left; font-size: 11.5px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .7px; color: var(--muted);
+      border-bottom: 2px solid var(--border);
+    }
+    tbody tr {
+      border-bottom: 1px solid var(--border);
+      transition: background var(--transition);
+    }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: rgba(0,215,176,.03); }
+    tbody td { padding: 13px 16px; color: var(--text); }
+    .ev-id { font-weight: 700; color: var(--blue); font-family: monospace; font-size: 13px; }
+
+    /* SoC mini bar */
+    .soc-bar { width: 80px; height: 7px; border-radius: 50px; background: rgba(0,0,0,.07); overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 8px; }
+    .soc-fill { height: 100%; border-radius: 50px; }
+
+    /* ══════════════════════════════════════════════
+       PAGE 3 — CHARGING STATIONS
+    ══════════════════════════════════════════════ */
+    .gps-banner {
+      background: linear-gradient(135deg,var(--navy),var(--navy2));
+      border-radius: var(--radius); padding: 20px 24px;
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 24px; flex-wrap: wrap; gap: 12px;
+    }
+    .gps-banner .gps-info { color: rgba(255,255,255,.7); font-size: 13.5px; }
+    .gps-banner .gps-info strong { color: #fff; display: block; font-size: 15px; margin-bottom: 3px; }
+    .gps-status { display: flex; align-items: center; gap: 8px; }
+    .gps-status .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--yellow); }
+    .gps-status span { color: rgba(255,255,255,.6); font-size: 12.5px; }
+
+    .station-card {
+      background: var(--white); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 24px;
+      box-shadow: var(--card-shadow); transition: all var(--transition);
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .station-card:hover { transform: translateY(-4px); box-shadow: 0 12px 36px rgba(14,27,48,.12); }
+    .station-header { display: flex; justify-content: space-between; align-items: flex-start; }
+    .station-name { font-size: 17px; font-weight: 800; color: var(--text); }
+    .station-dist { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+    .station-score {
+      width: 50px; height: 50px; border-radius: 50%;
+      border: 3px solid var(--green); display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 800; color: var(--green2); flex-shrink: 0;
+    }
+    .station-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .station-meta-item { background: var(--bg); border-radius: 8px; padding: 10px 12px; }
+    .station-meta-item .label { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+    .station-meta-item .val   { font-size: 20px; font-weight: 800; color: var(--text); }
+    .station-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+    /* ══════════════════════════════════════════════
+       PAGE 4 — SMART CHARGING SIMULATOR
+    ══════════════════════════════════════════════ */
+    .sim-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+
+    .form-group { margin-bottom: 18px; }
+    .form-group label { display: block; font-size: 12.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 8px; }
+    .form-control {
+      width: 100%; padding: 11px 14px; border-radius: 9px;
+      border: 1.5px solid var(--border); background: var(--bg);
+      font-size: 14px; color: var(--text); font-family: inherit;
+      transition: border-color var(--transition), box-shadow var(--transition);
+      outline: none;
+    }
+    .form-control:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(0,215,176,.14); }
+    input[type="range"] {
+      -webkit-appearance: none; appearance: none;
+      width: 100%; height: 6px; border-radius: 50px;
+      background: linear-gradient(90deg,var(--green) 0%,var(--border) 0%);
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: var(--white); border: 3px solid var(--green);
+      cursor: pointer; box-shadow: 0 2px 8px rgba(0,215,176,.4);
+    }
+
+    /* Battery Visual */
+    .battery-visual {
+      display: flex; flex-direction: column; align-items: center; margin: 20px 0;
+    }
+    .battery-body {
+      width: 90px; height: 170px; border-radius: 14px;
+      border: 4px solid var(--border); position: relative; overflow: hidden;
+      background: rgba(0,0,0,.03);
+    }
+    .battery-tip {
+      width: 36px; height: 12px; background: var(--border);
+      border-radius: 4px 4px 0 0; margin: 0 auto; margin-bottom: 2px;
+    }
+    .battery-fill {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      transition: height .8s cubic-bezier(.4,0,.2,1), background .8s;
+      border-radius: 0 0 10px 10px;
+    }
+    .battery-pct {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      font-size: 22px; font-weight: 900; color: var(--text); z-index: 1;
+    }
+    .charging-bolt {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      font-size: 32px; z-index: 2; display: none;
+      animation: boltPulse 1.2s infinite;
+    }
+    @keyframes boltPulse { 0%,100% { opacity:1; transform:translate(-50%,-50%) scale(1); } 50% { opacity:.6; transform:translate(-50%,-50%) scale(1.2); } }
+
+    .big-pct { font-size: 48px; font-weight: 900; color: var(--text); text-align: center; }
+    .pct-label { font-size: 13px; color: var(--muted); text-align: center; }
+
+    .telemetry-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 18px; }
+    .tele-card {
+      background: var(--bg); border-radius: 10px; padding: 14px;
+      border: 1px solid var(--border);
+    }
+    .tele-label { font-size: 11px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .6px; }
+    .tele-value { font-size: 22px; font-weight: 800; color: var(--text); margin-top: 4px; }
+    .tele-unit  { font-size: 11.5px; color: var(--muted); margin-left: 2px; }
+
+    /* ══════════════════════════════════════════════
+       PAGE 5 — ENERGY MANAGEMENT
+    ══════════════════════════════════════════════ */
+    .energy-overview {
+      display: grid; grid-template-columns: repeat(3,1fr); gap: 20px;
+      margin-bottom: 24px;
+    }
+    .energy-metric {
+      background: var(--navy); border-radius: var(--radius); padding: 22px; color: #fff;
+      text-align: center;
+    }
+    .energy-metric .em-icon { font-size: 32px; margin-bottom: 10px; }
+    .energy-metric .em-val  { font-size: 28px; font-weight: 800; }
+    .energy-metric .em-label{ font-size: 12px; color: rgba(255,255,255,.55); margin-top: 4px; }
+
+    .route-card {
+      background: linear-gradient(135deg,rgba(0,215,176,.05),rgba(97,114,220,.05));
+      border: 1px solid var(--border); border-radius: 11px; padding: 18px 20px; margin-bottom: 14px;
+      display: flex; align-items: center; gap: 16px;
+      transition: all var(--transition);
+    }
+    .route-card:hover { transform: translateX(5px); border-color: var(--green); }
+    .route-icon { font-size: 26px; }
+    .route-info { flex: 1; }
+    .route-info h4 { font-size: 14px; font-weight: 700; }
+    .route-info p  { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .route-pct { font-size: 20px; font-weight: 800; color: var(--green2); }
+
+    /* ══════════════════════════════════════════════
+       PAGE 6 — BATTERY INTELLIGENCE
+    ══════════════════════════════════════════════ */
+    .dual-bank {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;
+    }
+    .bank-card {
+      background: var(--white); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 24px; box-shadow: var(--card-shadow);
+      text-align: center; position: relative; overflow: hidden;
+    }
+    .bank-card.primary::before {
+      content: ''; position: absolute; inset: 0;
+      background: linear-gradient(135deg,rgba(0,215,176,.06),transparent);
+      pointer-events: none;
+    }
+    .bank-card.secondary::before {
+      content: ''; position: absolute; inset: 0;
+      background: linear-gradient(135deg,rgba(97,114,220,.06),transparent);
+      pointer-events: none;
+    }
+    .bank-label { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 8px; }
+    .bank-name  { font-size: 18px; font-weight: 800; margin-bottom: 20px; }
+    .donut-wrap { position: relative; width: 120px; height: 120px; margin: 0 auto 16px; }
+    .donut-wrap svg { transform: rotate(-90deg); }
+    .donut-pct {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%,-50%);
+      font-size: 22px; font-weight: 900;
+    }
+    .bank-stats { display: flex; justify-content: center; gap: 20px; margin-top: 12px; }
+    .bank-stat .bs-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+    .bank-stat .bs-val   { font-size: 16px; font-weight: 800; }
+
+    .cell-grid { display: grid; grid-template-columns: repeat(8,1fr); gap: 6px; }
+    .cell {
+      aspect-ratio: 1; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+      font-size: 9.5px; font-weight: 700; cursor: pointer; transition: transform var(--transition);
+      border: 1.5px solid transparent;
+    }
+    .cell:hover { transform: scale(1.2); }
+    .cell-good      { background: rgba(0,215,176,.2); color: var(--green2); border-color: rgba(0,215,176,.4); }
+    .cell-warn      { background: rgba(245,182,46,.2); color: #c8900f; border-color: rgba(245,182,46,.4); }
+    .cell-critical  { background: rgba(239,68,68,.18); color: var(--red); border-color: rgba(239,68,68,.35); }
+
+    /* ══════════════════════════════════════════════
+       RESPONSIVE
+    ══════════════════════════════════════════════ */
+    @media (max-width: 1100px) {
+      .grid-4 { grid-template-columns: repeat(2,1fr); }
+      .sim-layout { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 800px) {
+      #sidebar { width: 68px; }
+      #sidebar .nav-item span, #sidebar .sidebar-logo h2,
+      #sidebar .sidebar-logo span, #sidebar .sidebar-footer { display: none; }
+      #main { margin-left: 68px; }
+      .page { padding: 20px 14px; }
+      .grid-2, .grid-3, .energy-overview, .dual-bank { grid-template-columns: 1fr; }
+      .cell-grid { grid-template-columns: repeat(6,1fr); }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════ SIDEBAR ═══════════════════ -->
+<nav id="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-icon">⚡</div>
+    <h2>EV SmartGrid</h2>
+    <span>2030 Platform</span>
+  </div>
+
+  <div class="sidebar-nav">
+    <button class="nav-item active" onclick="showPage('dashboard',this)">
+      <span class="nav-icon">🏠</span><span>Dashboard</span>
+    </button>
+    <button class="nav-item" onclick="showPage('vehicles',this)">
+      <span class="nav-icon">🚗</span><span>EV Vehicles</span>
+    </button>
+    <button class="nav-item" onclick="showPage('stations',this)">
+      <span class="nav-icon">📍</span><span>Charging Stations</span>
+    </button>
+    <button class="nav-item" onclick="showPage('charging',this)">
+      <span class="nav-icon">⚡</span><span>Smart Charging</span>
+    </button>
+    <button class="nav-item" onclick="showPage('energy',this)">
+      <span class="nav-icon">🌞</span><span>Energy & Solar</span>
+    </button>
+    <button class="nav-item" onclick="showPage('battery',this)">
+      <span class="nav-icon">🔋</span><span>Battery Intel</span>
+    </button>
+  </div>
+
+  <div class="sidebar-footer">
+    <span class="online-dot"></span>System Online · v3.2.1
+  </div>
+</nav>
+
+<!-- ═══════════════════ MAIN CONTENT ═══════════════════ -->
+<div id="main">
+
+  <!-- ──────────────────────────────────
+       PAGE 1: DASHBOARD
+  ────────────────────────────────── -->
+  <div id="dashboard" class="page active">
+    <div class="page-header">
+      <div>
+        <h1>⚡ EV SmartGrid Control Center</h1>
+        <p>Real-time monitoring &amp; intelligent load balancing · Mumbai Metro Zone</p>
+      </div>
+      <button class="btn btn-primary" onclick="simulateCity()">▶ Simulate City</button>
+    </div>
+
+    <!-- Stat Cards -->
+    <div class="grid-4" style="margin-bottom:24px;">
+      <div class="stat-card green">
+        <span class="stat-icon">🚗</span>
+        <div class="stat-label">EVs Connected</div>
+        <div class="stat-value green" id="stat-evs">8,542</div>
+        <div class="stat-delta">↑ 142 from last hour</div>
+      </div>
+      <div class="stat-card yellow">
+        <span class="stat-icon">🔌</span>
+        <div class="stat-label">Active Chargers</div>
+        <div class="stat-value yellow" id="stat-chargers">427</div>
+        <div class="stat-delta">↑ 23 since 6 AM</div>
+      </div>
+      <div class="stat-card blue">
+        <span class="stat-icon">☀️</span>
+        <div class="stat-label">Solar Generation</div>
+        <div class="stat-value blue" id="stat-solar">73%</div>
+        <div class="stat-delta">Peak output: 142 MW</div>
+      </div>
+      <div class="stat-card red">
+        <span class="stat-icon">📡</span>
+        <div class="stat-label">Grid Demand</div>
+        <div class="stat-value red" id="stat-demand">61%</div>
+        <div class="stat-delta">↓ 8% from yesterday</div>
+      </div>
+    </div>
+
+    <!-- Energy Management + AI Recs -->
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title">Energy Management – Live Levels</div>
+        <div class="progress-wrap">
+          <div class="progress-label"><span>☀️ Solar Power</span><span id="prog-solar-val">73%</span></div>
+          <div class="progress-track"><div class="progress-fill pf-green" id="prog-solar" style="width:73%"></div></div>
+        </div>
+        <div class="progress-wrap">
+          <div class="progress-label"><span>🔌 Grid Demand</span><span id="prog-demand-val">61%</span></div>
+          <div class="progress-track"><div class="progress-fill pf-red" id="prog-demand" style="width:61%"></div></div>
+        </div>
+        <div class="progress-wrap">
+          <div class="progress-label"><span>🔋 Battery Storage</span><span id="prog-batt-val">84%</span></div>
+          <div class="progress-track"><div class="progress-fill pf-yellow" id="prog-batt" style="width:84%"></div></div>
+        </div>
+        <div class="progress-wrap" style="margin-bottom:0">
+          <div class="progress-label"><span>⚡ Renewable Mix</span><span id="prog-renew-val">68%</span></div>
+          <div class="progress-track"><div class="progress-fill pf-blue" id="prog-renew" style="width:68%"></div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">🤖 AI Recommendations</div>
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <div class="rec-card" onclick="applyRec('Shifted 42 EVs to Station B – load balanced ✓')">
+            <span class="rec-icon">🔄</span>
+            <div>
+              <div class="rec-title">Shift 42 EVs to Station B</div>
+              <div class="rec-desc">Station A is at 94% capacity. Redistribute to relieve bottleneck.</div>
+              <div class="rec-gain">↑ Save 18 kWh · Reduce peak by 12%</div>
+            </div>
+          </div>
+          <div class="rec-card" onclick="applyRec('Delayed 28 non-critical charges – grid stabilised ✓')">
+            <span class="rec-icon">⏱️</span>
+            <div>
+              <div class="rec-title">Delay 28 Non-Critical Charges</div>
+              <div class="rec-desc">Shift to off-peak 02:00–05:00 window for ₹2,100 savings.</div>
+              <div class="rec-gain">↑ Save ₹2,100 · Reduce CO₂ by 4.2 kg</div>
+            </div>
+          </div>
+          <div class="rec-card" onclick="applyRec('Solar storage deployed – 36 kWh discharged ✓')">
+            <span class="rec-icon">☀️</span>
+            <div>
+              <div class="rec-title">Use Available Solar Storage</div>
+              <div class="rec-desc">36 kWh stored. Deploy now to avoid grid surcharge.</div>
+              <div class="rec-gain">↑ Save ₹890 · 100% renewable for 14 min</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ──────────────────────────────────
+       PAGE 2: EV VEHICLES
+  ────────────────────────────────── -->
+  <div id="vehicles" class="page">
+    <div class="page-header">
+      <div>
+        <h1>🚗 EV Vehicles Monitor</h1>
+        <p>Live fleet tracking &amp; battery state overview</p>
+      </div>
+      <button class="btn btn-primary" onclick="addEV()">+ Add EV Vehicle</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Connected Fleet – Live Data</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Vehicle ID</th>
+              <th>SoC Level</th>
+              <th>Station</th>
+              <th>Range (km)</th>
+              <th>Charge Rate</th>
+              <th>Status</th>
+              <th>Owner</th>
+            </tr>
+          </thead>
+          <tbody id="ev-table-body">
+            <!-- Rows inserted by JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ──────────────────────────────────
+       PAGE 3: CHARGING STATIONS
+  ────────────────────────────────── -->
+  <div id="stations" class="page">
+    <div class="page-header">
+      <div>
+        <h1>📍 Charging Stations Hub</h1>
+        <p>Locate &amp; navigate to the nearest smart charging stations</p>
+      </div>
+    </div>
+
+    <!-- GPS Banner -->
+    <div class="gps-banner">
+      <div class="gps-info">
+        <strong>📡 GPS Location Acquired</strong>
+        Mumbai, Maharashtra — 19.0760° N, 72.8777° E · Last fix: 2 sec ago
+      </div>
+      <div style="display:flex; align-items:center; gap:14px;">
+        <div class="gps-status">
+          <div class="dot" id="gps-dot"></div>
+          <span id="gps-status-text">Searching for stations…</span>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="findStations()">📍 Find Nearest Stations</button>
+      </div>
+    </div>
+
+    <!-- Station Cards -->
+    <div class="grid-3">
+      <div class="station-card">
+        <div class="station-header">
+          <div>
+            <div class="station-name">⚡ Station A – Andheri East</div>
+            <div class="station-dist">📍 1.2 km away · Fast Charging Hub</div>
+          </div>
+          <div class="station-score">92%</div>
+        </div>
+        <div class="station-meta">
+          <div class="station-meta-item"><div class="label">Chargers Free</div><div class="val" style="color:var(--green2)">14</div></div>
+          <div class="station-meta-item"><div class="label">Queue</div><div class="val">3 EVs</div></div>
+          <div class="station-meta-item"><div class="label">Max Power</div><div class="val" style="color:var(--blue)">150kW</div></div>
+          <div class="station-meta-item"><div class="label">Avg Wait</div><div class="val">8 min</div></div>
+        </div>
+        <div><span class="badge badge-green">✅ AI Recommended</span></div>
+        <div class="station-actions">
+          <button class="btn btn-primary btn-sm" onclick="selectStation('Station A – Andheri East')">Select Station</button>
+          <button class="btn btn-outline btn-sm" onclick="openMaps('Andheri East EV Station Mumbai')">🗺️ Google Maps</button>
+        </div>
+      </div>
+
+      <div class="station-card">
+        <div class="station-header">
+          <div>
+            <div class="station-name">🔋 Station B – Bandra BKC</div>
+            <div class="station-dist">📍 2.7 km away · Ultra-Fast Hub</div>
+          </div>
+          <div class="station-score">87%</div>
+        </div>
+        <div class="station-meta">
+          <div class="station-meta-item"><div class="label">Chargers Free</div><div class="val" style="color:var(--green2)">9</div></div>
+          <div class="station-meta-item"><div class="label">Queue</div><div class="val">7 EVs</div></div>
+          <div class="station-meta-item"><div class="label">Max Power</div><div class="val" style="color:var(--blue)">240kW</div></div>
+          <div class="station-meta-item"><div class="label">Avg Wait</div><div class="val">14 min</div></div>
+        </div>
+        <div><span class="badge badge-blue">⚡ Ultra Fast</span></div>
+        <div class="station-actions">
+          <button class="btn btn-blue btn-sm" onclick="selectStation('Station B – Bandra BKC')">Select Station</button>
+          <button class="btn btn-outline btn-sm" onclick="openMaps('Bandra BKC EV Station Mumbai')">🗺️ Google Maps</button>
+        </div>
+      </div>
+
+      <div class="station-card">
+        <div class="station-header">
+          <div>
+            <div class="station-name">☀️ Station C – Powai Solar</div>
+            <div class="station-dist">📍 4.1 km away · Solar Powered</div>
+          </div>
+          <div class="station-score">78%</div>
+        </div>
+        <div class="station-meta">
+          <div class="station-meta-item"><div class="label">Chargers Free</div><div class="val" style="color:var(--green2)">21</div></div>
+          <div class="station-meta-item"><div class="label">Queue</div><div class="val">1 EV</div></div>
+          <div class="station-meta-item"><div class="label">Max Power</div><div class="val" style="color:var(--blue)">80kW</div></div>
+          <div class="station-meta-item"><div class="label">Avg Wait</div><div class="val">3 min</div></div>
+        </div>
+        <div><span class="badge badge-yellow">🌞 100% Solar</span></div>
+        <div class="station-actions">
+          <button class="btn btn-yellow btn-sm" onclick="selectStation('Station C – Powai Solar')">Select Station</button>
+          <button class="btn btn-outline btn-sm" onclick="openMaps('Powai Solar EV Station Mumbai')">🗺️ Google Maps</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ──────────────────────────────────
+       PAGE 4: SMART CHARGING
+  ────────────────────────────────── -->
+  <div id="charging" class="page">
+    <div class="page-header">
+      <div>
+        <h1>⚡ Smart Charging Control</h1>
+        <p>Real-time session simulator &amp; intelligent charge scheduling</p>
+      </div>
+      <span class="badge badge-green" id="charging-badge">● Ready</span>
+    </div>
+
+    <div class="sim-layout">
+      <!-- Control Panel -->
+      <div class="card">
+        <div class="card-title">⚙️ Session Configuration</div>
+
+        <div class="form-group">
+          <label>Select Vehicle</label>
+          <select class="form-control" id="sim-vehicle">
+            <option>EV-1001 · Tata Nexon EV (SoC: 32%)</option>
+            <option>EV-1002 · MG ZS EV (SoC: 55%)</option>
+            <option>EV-1003 · Hyundai Ioniq 5 (SoC: 18%)</option>
+            <option>EV-1004 · Kia EV6 (SoC: 71%)</option>
+            <option>EV-1005 · BYD Atto 3 (SoC: 44%)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Charging Station</label>
+          <select class="form-control" id="sim-station">
+            <option value="80">Station A – Andheri East (80 kW DC Fast)</option>
+            <option value="120">Station B – Bandra BKC (120 kW Ultra Fast)</option>
+            <option value="60">Station C – Powai Solar (60 kW AC Solar)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Starting SoC</label>
+          <select class="form-control" id="sim-start-soc">
+            <option value="18">18% – Hyundai Ioniq 5</option>
+            <option value="32">32% – Tata Nexon EV</option>
+            <option value="44">44% – BYD Atto 3</option>
+            <option value="55">55% – MG ZS EV</option>
+            <option value="71">71% – Kia EV6</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Target Battery: <strong id="target-pct-label" style="color:var(--green2)">80%</strong></label>
+          <input type="range" id="target-slider" min="20" max="100" value="80"
+            oninput="updateSlider(this.value)" />
+        </div>
+
+        <div style="display:flex; gap:12px; flex-wrap:wrap;">
+          <button class="btn btn-primary" onclick="startCharging()" id="start-btn">▶ Start Charging</button>
+          <button class="btn btn-red" onclick="stopCharging()" id="stop-btn" style="display:none">■ Stop Charging</button>
+        </div>
+      </div>
+
+      <!-- Live Session Panel -->
+      <div class="card">
+        <div class="card-title">📊 Live Session Telemetry</div>
+
+        <div class="battery-visual">
+          <div class="battery-tip"></div>
+          <div class="battery-body">
+            <div class="battery-fill" id="bat-fill" style="height:32%; background:linear-gradient(0deg,#ef4444,#f97316)"></div>
+            <div class="battery-pct" id="bat-pct-text" style="color:#fff">32%</div>
+            <div class="charging-bolt" id="charging-bolt">⚡</div>
+          </div>
+        </div>
+
+        <div class="big-pct" id="big-pct">32%</div>
+        <div class="pct-label">State of Charge</div>
+
+        <div style="margin:14px 0 6px;">
+          <div class="progress-label">
+            <span>Charging Progress</span>
+            <span id="charge-progress-val">0%</span>
+          </div>
+          <div class="progress-track" style="height:12px;">
+            <div class="progress-fill pf-green" id="charge-progress-bar" style="width:0%"></div>
+          </div>
+        </div>
+
+        <div class="telemetry-grid">
+          <div class="tele-card">
+            <div class="tele-label">Power</div>
+            <div class="tele-value" id="tele-power">–<span class="tele-unit">kW</span></div>
+          </div>
+          <div class="tele-card">
+            <div class="tele-label">Energy Used</div>
+            <div class="tele-value" id="tele-energy">0.0<span class="tele-unit">kWh</span></div>
+          </div>
+          <div class="tele-card">
+            <div class="tele-label">Time Remaining</div>
+            <div class="tele-value" id="tele-time">–</div>
+          </div>
+          <div class="tele-card">
+            <div class="tele-label">Est. Cost</div>
+            <div class="tele-value" id="tele-cost">₹0<span class="tele-unit"></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ──────────────────────────────────
+       PAGE 5: ENERGY MANAGEMENT
+  ────────────────────────────────── -->
+  <div id="energy" class="page">
+    <div class="page-header">
+      <div>
+        <h1>🌞 Energy Management & Solar Grid</h1>
+        <p>Renewable energy routing, storage, and grid load balancing</p>
+      </div>
+      <button class="btn btn-yellow" onclick="balanceGrid()">⚡ Balance Grid Now</button>
+    </div>
+
+    <!-- Overview metrics -->
+    <div class="energy-overview" style="margin-bottom:24px;">
+      <div class="energy-metric">
+        <div class="em-icon">☀️</div>
+        <div class="em-val" id="em-solar">142 MW</div>
+        <div class="em-label">Solar Output (Live)</div>
+      </div>
+      <div class="energy-metric" style="background:linear-gradient(135deg,var(--blue),#4a5bbf)">
+        <div class="em-icon">🔌</div>
+        <div class="em-val" id="em-grid">87 MW</div>
+        <div class="em-label">Grid Draw (Current)</div>
+      </div>
+      <div class="energy-metric" style="background:linear-gradient(135deg,#c8900f,#f5b62e)">
+        <div class="em-icon">🔋</div>
+        <div class="em-val" id="em-batt">36 kWh</div>
+        <div class="em-label">Battery Reserve</div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <!-- Load Balancing -->
+      <div class="card">
+        <div class="card-title">📊 Real-Time Grid Load Balancing</div>
+
+        <div class="progress-wrap">
+          <div class="progress-label"><span>🌞 Solar Feed-in</span><span id="en-solar-val">73%</span></div>
+          <div class="progress-track"><div class="progress-fill pf-green" id="en-solar" style="width:73%"></div></div>
+        </div>
+        <div class="progress-wrap">
+          <div class="progress-label"><span>🔌 Grid Draw</span><span id="en-grid-val">48%</span></div>
+          <div class="progress-track"><div class="progress-fill pf-blue" id="en-grid" style="width:48%"></div></div>
+        </div>
+        <div class="progress-wrap">
+          <div class="progress-label"><span>🔋 Battery Dispatch</span><span id="en-batt-val">62%</span></div>
+          <div class="progress-track"><div class="progress-fill pf-yellow" id="en-batt" style="width:62%"></div></div>
+        </div>
+        <div class="progress-wrap" style="margin-bottom:0">
+          <div class="progress-label"><span>🏭 Industrial Load</span><span id="en-ind-val">35%</span></div>
+          <div class="progress-track"><div class="progress-fill pf-red" id="en-ind" style="width:35%"></div></div>
+        </div>
+      </div>
+
+      <!-- Energy Routing -->
+      <div class="card">
+        <div class="card-title">🔀 Energy Routing Channels</div>
+
+        <div class="route-card">
+          <span class="route-icon">☀️</span>
+          <div class="route-info">
+            <h4>Solar → EV Fleet</h4>
+            <p>Direct rooftop solar to 342 charging EVs</p>
+          </div>
+          <div class="route-pct">58%</div>
+        </div>
+        <div class="route-card">
+          <span class="route-icon">🔋</span>
+          <div class="route-info">
+            <h4>Battery → Peak Demand</h4>
+            <p>Discharging 24 kWh during morning peak</p>
+          </div>
+          <div class="route-pct">24%</div>
+        </div>
+        <div class="route-card">
+          <span class="route-icon">🔌</span>
+          <div class="route-info">
+            <h4>Grid → Battery Reserve</h4>
+            <p>Off-peak charging for night-time buffer</p>
+          </div>
+          <div class="route-pct">18%</div>
+        </div>
+
+        <div style="margin-top:16px; padding:14px; background:rgba(0,215,176,.06); border:1px solid rgba(0,215,176,.2); border-radius:10px;">
+          <div style="font-size:13px; font-weight:700; color:var(--green2); margin-bottom:6px;">🌱 Carbon Impact Today</div>
+          <div style="display:flex; gap:20px;">
+            <div><div style="font-size:11px; color:var(--muted);">CO₂ Avoided</div><div style="font-size:18px; font-weight:800;">4.2 Tonnes</div></div>
+            <div><div style="font-size:11px; color:var(--muted);">Trees Equivalent</div><div style="font-size:18px; font-weight:800;">192</div></div>
+            <div><div style="font-size:11px; color:var(--muted);">Cost Saved</div><div style="font-size:18px; font-weight:800;">₹18,420</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ──────────────────────────────────
+       PAGE 6: BATTERY INTELLIGENCE
+  ────────────────────────────────── -->
+  <div id="battery" class="page">
+    <div class="page-header">
+      <div>
+        <h1>🔋 Battery Intelligence & Dual-Bank System</h1>
+        <p>Advanced dual-bank EV architecture management &amp; cell-level optimization</p>
+      </div>
+      <button class="btn btn-blue" onclick="optimizeBanks()">🔧 Optimize Banks</button>
+    </div>
+
+    <!-- Dual Bank Cards -->
+    <div class="dual-bank">
+      <div class="bank-card primary">
+        <div class="bank-label">Bank Alpha</div>
+        <div class="bank-name">🔋 Main Traction Power</div>
+        <div class="donut-wrap">
+          <svg width="120" height="120" viewBox="0 0 120 120">
+            <circle cx="60" cy="60" r="50" fill="none" stroke="var(--border)" stroke-width="12"/>
+            <circle cx="60" cy="60" r="50" fill="none" stroke="var(--green)" stroke-width="12"
+              stroke-dasharray="314" stroke-dashoffset="63" stroke-linecap="round"/>
+          </svg>
+          <div class="donut-pct" style="color:var(--green2)">80%</div>
+        </div>
+        <div style="color:var(--muted); font-size:12px;">Power Allocation</div>
+        <div class="bank-stats">
+          <div class="bank-stat">
+            <div class="bs-label">SoH</div>
+            <div class="bs-val" style="color:var(--green2)">94%</div>
+          </div>
+          <div class="bank-stat">
+            <div class="bs-label">Cycles</div>
+            <div class="bs-val">1,247</div>
+          </div>
+          <div class="bank-stat">
+            <div class="bs-label">Temp</div>
+            <div class="bs-val">28°C</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="bank-card secondary">
+        <div class="bank-label">Bank Beta</div>
+        <div class="bank-name">🛡️ Auxiliary Reserve</div>
+        <div class="donut-wrap">
+          <svg width="120" height="120" viewBox="0 0 120 120">
+            <circle cx="60" cy="60" r="50" fill="none" stroke="var(--border)" stroke-width="12"/>
+            <circle cx="60" cy="60" r="50" fill="none" stroke="var(--blue)" stroke-width="12"
+              stroke-dasharray="314" stroke-dashoffset="251" stroke-linecap="round"/>
+          </svg>
+          <div class="donut-pct" style="color:var(--blue)">20%</div>
+        </div>
+        <div style="color:var(--muted); font-size:12px;">Power Allocation</div>
+        <div class="bank-stats">
+          <div class="bank-stat">
+            <div class="bs-label">SoH</div>
+            <div class="bs-val" style="color:var(--blue)">98%</div>
+          </div>
+          <div class="bank-stat">
+            <div class="bs-label">Cycles</div>
+            <div class="bs-val">382</div>
+          </div>
+          <div class="bank-stat">
+            <div class="bs-label">Temp</div>
+            <div class="bs-val">24°C</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cell Grid -->
+    <div class="card" style="margin-bottom:24px;">
+      <div class="card-title">🔬 Cell-Level Optimization Map (Bank Alpha — 32 Cells)</div>
+      <div class="cell-grid" id="cell-grid"></div>
+      <div style="display:flex; gap:16px; margin-top:16px; flex-wrap:wrap;">
+        <span class="badge badge-green">🟢 Good (&gt;85%)</span>
+        <span class="badge badge-yellow">🟡 Warning (60–85%)</span>
+        <span class="badge badge-red">🔴 Critical (&lt;60%)</span>
+      </div>
+    </div>
+
+    <!-- Battery Health Cards -->
+    <div class="grid-3">
+      <div class="card" style="text-align:center;">
+        <div style="font-size:36px; margin-bottom:8px;">⚡</div>
+        <div class="stat-value blue">94%</div>
+        <div class="stat-label" style="margin-top:4px;">State of Health</div>
+        <div style="font-size:12px; color:var(--muted); margin-top:8px;">Excellent condition · 2.3 yr remaining</div>
+      </div>
+      <div class="card" style="text-align:center;">
+        <div style="font-size:36px; margin-bottom:8px;">🌡️</div>
+        <div class="stat-value green">26°C</div>
+        <div class="stat-label" style="margin-top:4px;">Average Cell Temp</div>
+        <div style="font-size:12px; color:var(--muted); margin-top:8px;">Optimal range · Cooling active</div>
+      </div>
+      <div class="card" style="text-align:center;">
+        <div style="font-size:36px; margin-bottom:8px;">📈</div>
+        <div class="stat-value yellow">97%</div>
+        <div class="stat-label" style="margin-top:4px;">Optimization Score</div>
+        <div style="font-size:12px; color:var(--muted); margin-top:8px;">AI balancing active · 3 cells flagged</div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /#main -->
+
+<!-- ═════ TOAST CONTAINER ═════ -->
+<div id="toast-container"></div>
+
+<!-- ═══════════════════════════════════════════════
+     JAVASCRIPT
+═══════════════════════════════════════════════ -->
+<script>
+/* ──────────────────────────────────────────────
+   STATE
+────────────────────────────────────────────── */
+const state = {
+  evs: 8542, chargers: 427, solar: 73, demand: 61, batt: 84, renew: 68,
+  charging: false, chargingInterval: null,
+  currentSoC: 32, targetSoC: 80,
+  energyUsed: 0, startTime: null,
+  evCounter: 1006,
+  gpsFound: false
+};
+
+const EVS_DATA = [
+  { id:'EV-1001', soc:32, station:'A – Andheri', range:98,  rate:'80 kW', status:'Charging', owner:'Rahul M.' },
+  { id:'EV-1002', soc:55, station:'B – BKC',     range:184, rate:'120 kW', status:'Connected', owner:'Priya S.' },
+  { id:'EV-1003', soc:18, station:'A – Andheri', range:51,  rate:'80 kW', status:'Charging', owner:'Amit K.' },
+  { id:'EV-1004', soc:71, station:'C – Powai',   range:239, rate:'60 kW', status:'Ready', owner:'Sneha R.' },
+  { id:'EV-1005', soc:44, station:'B – BKC',     range:146, rate:'120 kW', status:'Charging', owner:'Vikram J.' }
+];
+
+/* ──────────────────────────────────────────────
+   NAVIGATION
+────────────────────────────────────────────── */
+function showPage(id, el) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  el.classList.add('active');
+}
+
+/* ──────────────────────────────────────────────
+   TOAST SYSTEM
+────────────────────────────────────────────── */
+function toast(msg, type = 'success') {
+  const container = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  t.className = 'toast ' + (type === 'error' ? 'error' : type === 'warning' ? 'warning' : '');
+  const icon = type === 'error' ? '❌' : type === 'warning' ? '⚠️' : '✅';
+  t.innerHTML = `<span>${icon}</span><span>${msg}</span>`;
+  container.appendChild(t);
+  setTimeout(() => {
+    t.classList.add('hiding');
+    t.addEventListener('animationend', () => t.remove());
+  }, 3800);
+}
+
+/* ──────────────────────────────────────────────
+   DASHBOARD
+────────────────────────────────────────────── */
+function simulateCity() {
+  const delta = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+  state.solar   = Math.min(100, Math.max(30, state.solar   + delta(-8, 12)));
+  state.demand  = Math.min(100, Math.max(30, state.demand  + delta(-10, 10)));
+  state.batt    = Math.min(100, Math.max(40, state.batt    + delta(-5, 8)));
+  state.renew   = Math.min(100, Math.max(30, state.renew   + delta(-6, 10)));
+  state.evs     = state.evs     + delta(-120, 240);
+  state.chargers= state.chargers + delta(-18, 36);
+
+  animateStat('stat-evs', state.evs.toLocaleString());
+  animateStat('stat-chargers', state.chargers.toString());
+  animateStat('stat-solar', state.solar + '%');
+  animateStat('stat-demand', state.demand + '%');
+
+  setProgress('prog-solar',  state.solar,  'prog-solar-val');
+  setProgress('prog-demand', state.demand, 'prog-demand-val');
+  setProgress('prog-batt',   state.batt,   'prog-batt-val');
+  setProgress('prog-renew',  state.renew,  'prog-renew-val');
+
+  toast(`City load simulated — Solar ${state.solar}%, Grid Demand ${state.demand}%`);
+}
+
+function animateStat(id, val) {
+  const el = document.getElementById(id);
+  el.style.transform = 'scale(1.08)';
+  el.style.transition = 'transform .2s';
+  el.textContent = val;
+  setTimeout(() => { el.style.transform = ''; }, 220);
+}
+
+function setProgress(barId, pct, labelId) {
+  document.getElementById(barId).style.width = pct + '%';
+  if (labelId) document.getElementById(labelId).textContent = pct + '%';
+}
+
+function applyRec(msg) {
+  toast(msg);
+}
+
+/* ──────────────────────────────────────────────
+   EV VEHICLES TABLE
+────────────────────────────────────────────── */
+function getSoCColor(soc) {
+  if (soc >= 70) return 'var(--green2)';
+  if (soc >= 40) return 'var(--yellow)';
+  return 'var(--red)';
+}
+
+function getStatusBadge(status) {
+  const map = {
+    'Charging':  'badge-green',
+    'Connected': 'badge-blue',
+    'Ready':     'badge-yellow'
+  };
+  const icon = { 'Charging':'⚡','Connected':'🔗','Ready':'✅' };
+  return `<span class="badge ${map[status] || 'badge-grey'}">${icon[status]||''}${status}</span>`;
+}
+
+function renderEVTable() {
+  const tbody = document.getElementById('ev-table-body');
+  tbody.innerHTML = EVS_DATA.map(ev => `
+    <tr>
+      <td><span class="ev-id">${ev.id}</span></td>
+      <td>
+        <span class="soc-bar"><span class="soc-fill" style="width:${ev.soc}%; background:${getSoCColor(ev.soc)};"></span></span>
+        <strong style="color:${getSoCColor(ev.soc)}">${ev.soc}%</strong>
+      </td>
+      <td>${ev.station}</td>
+      <td>${ev.range} km</td>
+      <td><span class="badge badge-grey">${ev.rate}</span></td>
+      <td>${getStatusBadge(ev.status)}</td>
+      <td style="color:var(--muted); font-size:12.5px;">${ev.owner}</td>
+    </tr>
+  `).join('');
+}
+
+function addEV() {
+  const stations = ['A – Andheri','B – BKC','C – Powai','A – Andheri'];
+  const statuses = ['Charging','Connected','Ready'];
+  const cars = ['Tata Nexon EV','MG ZS EV','Hyundai Ioniq 5','Kia EV6','BYD Atto 3'];
+  const rates = ['80 kW','120 kW','60 kW'];
+  const names = ['Arjun T.','Meera V.','Suresh N.','Kavya P.','Rajan D.'];
+  const soc = Math.floor(Math.random() * 70) + 15;
+  const ev = {
+    id: `EV-${state.evCounter++}`,
+    soc,
+    station: stations[Math.floor(Math.random() * stations.length)],
+    range: Math.floor(soc * 3.4),
+    rate: rates[Math.floor(Math.random() * rates.length)],
+    status: statuses[Math.floor(Math.random() * statuses.length)],
+    owner: names[Math.floor(Math.random() * names.length)]
+  };
+  EVS_DATA.push(ev);
+  renderEVTable();
+  toast(`${ev.id} added to fleet · SoC: ${ev.soc}% · Station ${ev.station}`);
+}
+
+/* ──────────────────────────────────────────────
+   CHARGING STATIONS
+────────────────────────────────────────────── */
+function findStations() {
+  const dot  = document.getElementById('gps-dot');
+  const text = document.getElementById('gps-status-text');
+  dot.style.background = 'var(--yellow)';
+  text.textContent = 'Scanning… 0.8 km radius';
+  toast('GPS scanning — locating nearest stations…', 'warning');
+  setTimeout(() => {
+    dot.style.background = 'var(--green)';
+    text.textContent = '3 stations found nearby ✓';
+    toast('Found 3 charging stations near you!');
+    state.gpsFound = true;
+  }, 1800);
+}
+
+function selectStation(name) {
+  toast(`Station selected: ${name} · Routing in progress…`);
+}
+
+function openMaps(query) {
+  const url = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
+  window.open(url, '_blank', 'noopener');
+}
+
+/* ──────────────────────────────────────────────
+   SMART CHARGING SIMULATOR
+────────────────────────────────────────────── */
+function updateSlider(val) {
+  document.getElementById('target-pct-label').textContent = val + '%';
+  const input = document.getElementById('target-slider');
+  const pct = ((val - 20) / 80) * 100;
+  input.style.background = `linear-gradient(90deg, var(--green) ${pct}%, var(--border) ${pct}%)`;
+}
+
+function getBattColor(soc) {
+  if (soc >= 70) return 'linear-gradient(0deg,#00b894,var(--green))';
+  if (soc >= 40) return 'linear-gradient(0deg,#f39c12,var(--yellow))';
+  return 'linear-gradient(0deg,#e74c3c,#f97316)';
+}
+
+function updateBatteryUI(soc) {
+  const fill   = document.getElementById('bat-fill');
+  const pctTxt = document.getElementById('bat-pct-text');
+  const bigPct = document.getElementById('big-pct');
+  fill.style.height     = soc + '%';
+  fill.style.background = getBattColor(soc);
+  pctTxt.textContent    = soc + '%';
+  bigPct.textContent    = soc + '%';
+}
+
+function startCharging() {
+  if (state.charging) return;
+
+  const startSoCEl = document.getElementById('sim-start-soc');
+  const stationEl  = document.getElementById('sim-station');
+  const vehicleEl  = document.getElementById('sim-vehicle');
+
+  state.currentSoC = parseInt(startSoCEl.value);
+  state.targetSoC  = parseInt(document.getElementById('target-slider').value);
+  const power      = parseInt(stationEl.value);   // kW
+  const capacity   = 72;                           // kWh (avg EV battery)
+
+  if (state.currentSoC >= state.targetSoC) {
+    toast('Battery already at or above target!', 'warning');
+    return;
+  }
+
+  state.charging   = true;
+  state.energyUsed = 0;
+  state.startTime  = Date.now();
+
+  // UI changes
+  document.getElementById('start-btn').style.display = 'none';
+  document.getElementById('stop-btn').style.display  = '';
+  document.getElementById('charging-badge').textContent = '⚡ Charging';
+  document.getElementById('charging-badge').className  = 'badge badge-green';
+  document.getElementById('charging-bolt').style.display = 'block';
+
+  const stationName = stationEl.options[stationEl.selectedIndex].text.split('(')[0].trim();
+  toast(`Charging started at ${stationName} · ${power} kW`);
+
+  // Telemetry interval (1 second = ~1 min simulated)
+  state.chargingInterval = setInterval(() => {
+    if (!state.charging) return;
+
+    // Each tick advances SoC by power/capacity percent (accelerated 10x)
+    const socPerTick  = (power / capacity) * (10 / 60) * 100; // approx
+    state.currentSoC  = Math.min(state.targetSoC, parseFloat((state.currentSoC + socPerTick * 0.5).toFixed(1)));
+    state.energyUsed += (power / 3600) * 10;  // kWh per tick
+
+    const remaining = state.targetSoC - state.currentSoC;
+    const timeLeftMin = Math.max(0, Math.ceil((remaining / 100 * capacity / power) * 60));
+    const cost = (state.energyUsed * 9.5).toFixed(0);  // ₹9.5/kWh
+
+    updateBatteryUI(Math.round(state.currentSoC));
+
+    // Progress bar
+    const totalNeeded  = state.targetSoC - parseInt(startSoCEl.value);
+    const done         = state.currentSoC - parseInt(startSoCEl.value);
+    const progressPct  = Math.min(100, Math.round((done / totalNeeded) * 100));
+    document.getElementById('charge-progress-bar').style.width = progressPct + '%';
+    document.getElementById('charge-progress-val').textContent = progressPct + '%';
+
+    // Telemetry
+    document.getElementById('tele-power').innerHTML  = `${power}<span class="tele-unit">kW</span>`;
+    document.getElementById('tele-energy').innerHTML = `${state.energyUsed.toFixed(1)}<span class="tele-unit">kWh</span>`;
+    document.getElementById('tele-time').textContent = timeLeftMin > 0 ? `${timeLeftMin} min` : 'Done!';
+    document.getElementById('tele-cost').innerHTML   = `₹${cost}`;
+
+    if (state.currentSoC >= state.targetSoC) {
+      stopCharging(true);
+    }
+  }, 600);
+}
+
+function stopCharging(completed = false) {
+  if (!state.charging && !completed) return;
+  state.charging = false;
+  clearInterval(state.chargingInterval);
+
+  document.getElementById('start-btn').style.display = '';
+  document.getElementById('stop-btn').style.display  = 'none';
+  document.getElementById('charging-badge').textContent = '● Ready';
+  document.getElementById('charging-badge').className  = 'badge badge-grey';
+  document.getElementById('charging-bolt').style.display = 'none';
+  document.getElementById('tele-power').innerHTML = `–<span class="tele-unit">kW</span>`;
+
+  if (completed) {
+    toast(`✅ Charging complete! Reached ${state.targetSoC}% · ₹${(state.energyUsed * 9.5).toFixed(0)} charged`);
+  } else {
+    toast(`Session stopped at ${Math.round(state.currentSoC)}% SoC`, 'warning');
+  }
+}
+
+/* ──────────────────────────────────────────────
+   ENERGY PAGE
+────────────────────────────────────────────── */
+function balanceGrid() {
+  const r = () => Math.floor(Math.random() * 30) + 50;
+  const vals = [r(), r(), r(), r()];
+  const ids  = ['en-solar','en-grid','en-batt','en-ind'];
+  const lbls = ['en-solar-val','en-grid-val','en-batt-val','en-ind-val'];
+  ids.forEach((id, i) => {
+    document.getElementById(id).style.width = vals[i] + '%';
+    document.getElementById(lbls[i]).textContent = vals[i] + '%';
+  });
+
+  // Update overview cards
+  const mw = Math.floor(Math.random() * 60) + 110;
+  document.getElementById('em-solar').textContent = mw + ' MW';
+  document.getElementById('em-grid').textContent  = (Math.floor(Math.random() * 40) + 60) + ' MW';
+  document.getElementById('em-batt').textContent  = (Math.floor(Math.random() * 30) + 20) + ' kWh';
+
+  toast('Grid balanced — optimal load distribution achieved ✅');
+}
+
+/* ──────────────────────────────────────────────
+   BATTERY INTELLIGENCE — CELL MAP
+────────────────────────────────────────────── */
+function buildCellGrid() {
+  const grid = document.getElementById('cell-grid');
+  grid.innerHTML = '';
+  for (let i = 1; i <= 32; i++) {
+    const score = Math.floor(Math.random() * 45) + 55; // 55–100%
+    const cls   = score >= 85 ? 'cell-good' : score >= 60 ? 'cell-warn' : 'cell-critical';
+    const cell  = document.createElement('div');
+    cell.className = `cell ${cls}`;
+    cell.textContent = score;
+    cell.title  = `Cell ${i}: ${score}% health`;
+    cell.onclick = () => toast(`Cell ${i} → Health: ${score}% · Voltage: ${(3.5 + Math.random() * 0.7).toFixed(2)}V`);
+    grid.appendChild(cell);
+  }
+}
+
+function optimizeBanks() {
+  buildCellGrid();
+  toast('AI bank optimization complete — cell balance recalibrated ✅');
+}
+
+/* ──────────────────────────────────────────────
+   INIT
+────────────────────────────────────────────── */
+function init() {
+  renderEVTable();
+  buildCellGrid();
+  updateSlider(80);
+  updateBatteryUI(32);
+
+  // Live tick — subtle stat drift every 8s
+  setInterval(() => {
+    if (Math.random() > 0.6) {
+      state.solar  = Math.min(100, Math.max(30, state.solar  + (Math.random() > .5 ? 1 : -1)));
+      state.demand = Math.min(100, Math.max(30, state.demand + (Math.random() > .5 ? 1 : -1)));
+      setProgress('prog-solar',  state.solar,  'prog-solar-val');
+      setProgress('prog-demand', state.demand, 'prog-demand-val');
+      document.getElementById('stat-solar').textContent  = state.solar  + '%';
+      document.getElementById('stat-demand').textContent = state.demand + '%';
+    }
+  }, 8000);
+}
+
+init();
+</script>
+</body>
+</html>
