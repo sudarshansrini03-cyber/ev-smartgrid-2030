@@ -69,7 +69,7 @@ async def ai_grid_advisor(data: TelemetryInput):
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
             json={
-                "model": "llama-3.1-8b-instant",
+                "model": "openai/gpt-oss-20b",
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": 120,
                 "temperature": 0.3
