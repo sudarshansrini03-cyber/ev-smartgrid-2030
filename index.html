@@ -1217,11 +1217,18 @@ function openMaps(query) {
 /* ──────────────────────────────────────────────
    SMART CHARGING SIMULATOR
 ────────────────────────────────────────────── */
-function updateSlider(val) {
+async function updateSlider(val) {
   document.getElementById('target-pct-label').textContent = val + '%';
-  const input = document.getElementById('target-slider');
-  const pct = ((val - 20) / 80) * 100;
-  input.style.background = `linear-gradient(90deg, var(--green) ${pct}%, var(--border) ${pct}%)`;
+  try {
+    const res = await fetch('/api/bms/allocate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ total_input_kw: 120, traction_soc: parseInt(val), aux_soc: 82, grid_demand_pct: 55 })
+    });
+    const d = await res.json();
+    if(document.getElementById('em-grid')) document.getElementById('em-grid').textContent = d.effective_input_kw + ' kW';
+    toast(`BMS: ${d.allocation.main_traction_bank_kw}kW Traction / ${d.allocation.auxiliary_bank_kw}kW Aux ✅`);
+  } catch(e) { console.error(e); }
 }
 
 function getBattColor(soc) {
