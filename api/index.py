@@ -71,7 +71,8 @@ async def ai_grid_advisor(data: TelemetryInput):
             json={
                 "model": "openai/gpt-oss-20b",
                 "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 120,
+                "max_completion_tokens": 500,
+                "reasoning_effort": "low",
                 "temperature": 0.3
             }
         )
