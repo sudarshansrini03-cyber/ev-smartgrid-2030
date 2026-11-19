@@ -2,7 +2,7 @@ import os
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, validator
 
 app = FastAPI(title="EV SmartGrid 2030 BMS Backend")
 
@@ -80,3 +80,91 @@ async def ai_grid_advisor(data: TelemetryInput):
             raise HTTPException(status_code=res.status_code, detail=res.text)
         reply = res.json()["choices"][0]["message"]["content"]
         return {"recommendation": reply}
+
+
+# ─────────────────────────────────────────────
+#  P2P ENERGY TRANSFER  POST /api/p2p/transfer
+# ─────────────────────────────────────────────
+
+PACK_CAPACITY_KWH = 72.0  # Assumed pack size for all EVs
+PLATFORM_FEE_PCT  = 0.05  # 5% service fee
+MIN_RESERVE_KWH   = 5.0   # Seller must keep at least 5 kWh reserve
+
+
+class P2PTransferRequest(BaseModel):
+    seller_id:     str   = Field(..., description="Vehicle ID of the seller")
+    buyer_id:      str   = Field(..., description="Vehicle ID of the buyer")
+    seller_soc:    float = Field(..., ge=0, le=100, description="Seller's current SoC %")
+    buyer_soc:     float = Field(..., ge=0, le=100, description="Buyer's current SoC %")
+    energy_kwh:    float = Field(..., gt=0, description="Energy to transfer in kWh")
+    price_per_kwh: float = Field(..., gt=0, description="Agreed price in ₹ per kWh")
+
+    @validator("energy_kwh")
+    def energy_must_be_positive(cls, v):
+        if v <= 0:
+            raise ValueError("energy_kwh must be positive")
+        return v
+
+
+class P2PTransferResponse(BaseModel):
+    seller_id:        str
+    buyer_id:         str
+    energy_kwh:       float
+    price_per_kwh:    float
+    base_amount:      float
+    service_fee:      float
+    buyer_total:      float
+    seller_receives:  float
+    seller_soc_after: float
+    buyer_soc_after:  float
+    status:           str
+
+
+@app.post("/api/p2p/transfer", response_model=P2PTransferResponse)
+def p2p_transfer(req: P2PTransferRequest):
+    # ── Validation ──────────────────────────────
+    if req.seller_id == req.buyer_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Seller and Buyer must be different vehicles."
+        )
+
+    seller_kwh_available = (req.seller_soc / 100.0) * PACK_CAPACITY_KWH
+    if req.energy_kwh > (seller_kwh_available - MIN_RESERVE_KWH):
+        max_transferable = max(0.0, seller_kwh_available - MIN_RESERVE_KWH)
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{req.seller_id} only has {seller_kwh_available:.1f} kWh available. "
+                f"Maximum transferable (keeping {MIN_RESERVE_KWH} kWh reserve): "
+                f"{max_transferable:.1f} kWh."
+            )
+        )
+
+    # ── Calculations ────────────────────────────
+    base_amount     = round(req.energy_kwh * req.price_per_kwh, 2)
+    service_fee     = round(base_amount * PLATFORM_FEE_PCT, 2)
+    buyer_total     = round(base_amount + service_fee, 2)
+    seller_receives = round(base_amount - service_fee, 2)
+
+    seller_soc_after = round(
+        ((seller_kwh_available - req.energy_kwh) / PACK_CAPACITY_KWH) * 100, 1
+    )
+    buyer_kwh_before = (req.buyer_soc / 100.0) * PACK_CAPACITY_KWH
+    buyer_soc_after  = round(
+        min(100.0, ((buyer_kwh_before + req.energy_kwh) / PACK_CAPACITY_KWH) * 100), 1
+    )
+
+    return P2PTransferResponse(
+        seller_id        = req.seller_id,
+        buyer_id         = req.buyer_id,
+        energy_kwh       = round(req.energy_kwh, 2),
+        price_per_kwh    = round(req.price_per_kwh, 2),
+        base_amount      = base_amount,
+        service_fee      = service_fee,
+        buyer_total      = buyer_total,
+        seller_receives  = seller_receives,
+        seller_soc_after = seller_soc_after,
+        buyer_soc_after  = buyer_soc_after,
+        status           = "confirmed"
+    )

@@ -462,6 +462,58 @@
       .grid-2, .grid-3, .energy-overview, .dual-bank { grid-template-columns: 1fr; }
       .cell-grid { grid-template-columns: repeat(6,1fr); }
     }
+
+    /* ══════════════════════════════════════════════
+       PAGE 7 — SELL CHARGE (P2P)
+    ══════════════════════════════════════════════ */
+    .p2p-flow {
+      display: flex; align-items: center; justify-content: center;
+      gap: 10px; margin: 20px 0 10px; flex-wrap: wrap;
+    }
+    .p2p-node {
+      background: var(--navy); color: #fff; border-radius: 12px;
+      padding: 12px 20px; font-size: 13px; font-weight: 700; text-align: center;
+      min-width: 100px;
+    }
+    .p2p-node .p2p-node-label { font-size: 10px; color: rgba(255,255,255,.5); text-transform: uppercase; letter-spacing: .7px; margin-bottom: 4px; }
+    .p2p-node.seller { border: 2px solid var(--red); }
+    .p2p-node.buyer  { border: 2px solid var(--green); }
+    .p2p-arrow { font-size: 24px; color: var(--green); animation: arrowPulse 1.6s infinite; }
+    @keyframes arrowPulse { 0%,100% { opacity:.4; transform:scaleX(1); } 50% { opacity:1; transform:scaleX(1.2); } }
+
+    .summary-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 12px 0; border-bottom: 1px solid var(--border);
+      font-size: 14px;
+    }
+    .summary-row:last-of-type { border-bottom: none; }
+    .summary-row .sr-label { color: var(--muted); font-weight: 600; }
+    .summary-row .sr-value { font-weight: 800; color: var(--text); }
+    .summary-row .sr-value.green { color: var(--green2); }
+    .summary-row .sr-value.red   { color: var(--red); }
+    .summary-row .sr-value.blue  { color: var(--blue); }
+    .summary-total {
+      background: linear-gradient(135deg,rgba(0,215,176,.08),rgba(97,114,220,.08));
+      border: 1px solid rgba(0,215,176,.25); border-radius: 11px;
+      padding: 16px 18px; margin-top: 14px; display: flex;
+      justify-content: space-between; align-items: center;
+    }
+    .summary-total .st-label { font-size: 13px; font-weight: 700; color: var(--muted); }
+    .summary-total .st-value { font-size: 26px; font-weight: 900; color: var(--green2); }
+
+    .p2p-history { margin-top: 24px; }
+    .p2p-history-row {
+      display: flex; align-items: center; gap: 14px;
+      padding: 12px 16px; border-radius: 10px; background: var(--bg);
+      border: 1px solid var(--border); margin-bottom: 8px;
+      font-size: 13px; transition: background var(--transition);
+    }
+    .p2p-history-row:hover { background: rgba(0,215,176,.05); }
+    .p2p-history-row .ph-icon { font-size: 20px; }
+    .p2p-history-row .ph-info { flex:1; }
+    .p2p-history-row .ph-info strong { display:block; font-weight:700; }
+    .p2p-history-row .ph-info span   { color:var(--muted); font-size:12px; }
+    .p2p-history-row .ph-amount { font-weight:800; color:var(--green2); }
   </style>
 </head>
 <body>
@@ -492,6 +544,9 @@
     </button>
     <button class="nav-item" onclick="showPage('battery',this)">
       <span class="nav-icon">🔋</span><span>Battery Intel</span>
+    </button>
+    <button class="nav-item" onclick="showPage('sell-charge',this)">
+      <span class="nav-icon">🤝</span><span>Sell Charge</span>
     </button>
   </div>
 
@@ -1033,6 +1088,139 @@
     </div>
   </div>
 
+  <!-- ──────────────────────────────────
+       PAGE 7: SELL CHARGE (P2P)
+  ────────────────────────────────── -->
+  <div id="sell-charge" class="page">
+    <div class="page-header">
+      <div>
+        <h1>🤝 Sell Charge – Peer-to-Peer Transfer</h1>
+        <p>Transfer surplus energy between connected EVs with a 5% platform fee</p>
+      </div>
+      <span class="badge badge-blue" id="p2p-badge">● Idle</span>
+    </div>
+
+    <!-- Animated flow visualizer -->
+    <div class="p2p-flow" id="p2p-flow-viz" style="display:none;">
+      <div class="p2p-node seller">
+        <div class="p2p-node-label">Seller</div>
+        <span id="p2p-flow-seller">—</span>
+      </div>
+      <div class="p2p-arrow">⚡⟶</div>
+      <div class="p2p-node buyer">
+        <div class="p2p-node-label">Buyer</div>
+        <span id="p2p-flow-buyer">—</span>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <!-- LEFT: Charge Transfer Config -->
+      <div class="card">
+        <div class="card-title">⚙️ Charge Transfer</div>
+
+        <div class="form-group">
+          <label>Seller Vehicle</label>
+          <select class="form-control" id="p2p-seller" onchange="p2pRefreshSummary()">
+            <!-- populated by JS -->
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Buyer Vehicle</label>
+          <select class="form-control" id="p2p-buyer" onchange="p2pRefreshSummary()">
+            <!-- populated by JS -->
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Energy to Sell (kWh)</label>
+          <input type="number" class="form-control" id="p2p-kwh"
+            min="1" max="60" value="10" placeholder="e.g. 10"
+            oninput="p2pRefreshSummary()" />
+        </div>
+
+        <div class="form-group">
+          <label>Price per kWh (₹)</label>
+          <input type="number" class="form-control" id="p2p-price"
+            min="1" max="30" value="12" step="0.5" placeholder="e.g. 12"
+            oninput="p2pRefreshSummary()" />
+        </div>
+
+        <button class="btn btn-blue" style="width:100%;" onclick="calculateP2P()">
+          🔢 Calculate Charge Sale
+        </button>
+
+        <!-- Seller SoC preview -->
+        <div id="p2p-seller-preview" style="margin-top:16px; padding:12px; background:var(--bg); border-radius:10px; border:1px solid var(--border); display:none;">
+          <div style="font-size:11.5px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.6px; margin-bottom:8px;">Seller Battery After Transfer</div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div class="soc-bar" style="width:140px; height:9px;">
+              <div class="soc-fill" id="p2p-seller-bar" style="width:0%; background:var(--green2);"></div>
+            </div>
+            <strong id="p2p-seller-after-pct" style="color:var(--green2);">—</strong>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Transaction Summary -->
+      <div class="card">
+        <div class="card-title">📋 Transaction Summary</div>
+
+        <div id="p2p-summary-placeholder" style="text-align:center; padding:40px 0; color:var(--muted);">
+          <div style="font-size:40px; margin-bottom:12px;">⚡</div>
+          <div style="font-size:14px;">Fill in the form and click<br><strong style="color:var(--text);">Calculate Charge Sale</strong></div>
+        </div>
+
+        <div id="p2p-summary-content" style="display:none;">
+          <div class="summary-row">
+            <span class="sr-label">Energy Transferred</span>
+            <span class="sr-value blue" id="sum-energy">— kWh</span>
+          </div>
+          <div class="summary-row">
+            <span class="sr-label">Price per kWh</span>
+            <span class="sr-value" id="sum-price">₹—</span>
+          </div>
+          <div class="summary-row">
+            <span class="sr-label">Base Amount</span>
+            <span class="sr-value" id="sum-base">₹—</span>
+          </div>
+          <div class="summary-row">
+            <span class="sr-label">Platform Service Fee (5%)</span>
+            <span class="sr-value red" id="sum-fee">₹—</span>
+          </div>
+          <div class="summary-row">
+            <span class="sr-label">Seller Receives</span>
+            <span class="sr-value green" id="sum-seller-gets">₹—</span>
+          </div>
+
+          <div class="summary-total">
+            <div>
+              <div class="st-label">Buyer Pays Total</div>
+              <div style="font-size:11px; color:var(--muted); margin-top:2px;" id="sum-buyer-label">incl. service fee</div>
+            </div>
+            <div class="st-value" id="sum-total">₹—</div>
+          </div>
+
+          <div id="p2p-error-msg" style="display:none; margin-top:14px; padding:12px 14px; background:rgba(239,68,68,.08); border:1px solid rgba(239,68,68,.3); border-radius:9px; color:var(--red); font-size:13px; font-weight:600;"></div>
+
+          <button class="btn btn-primary" style="width:100%; margin-top:18px;" id="p2p-confirm-btn" onclick="confirmP2PTransfer()">
+            ✅ Confirm Transfer
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Transaction History -->
+    <div class="p2p-history card" style="margin-top:0;">
+      <div class="card-title">📜 P2P Transaction History</div>
+      <div id="p2p-history-list">
+        <div style="text-align:center; padding:30px 0; color:var(--muted); font-size:13.5px;">
+          No transactions yet — confirm your first transfer above.
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div><!-- /#main -->
 
 <!-- ═════ TOAST CONTAINER ═════ -->
@@ -1377,6 +1565,215 @@ function optimizeBanks() {
 }
 
 /* ──────────────────────────────────────────────
+   SELL CHARGE — P2P ENERGY TRANSFER
+────────────────────────────────────────────── */
+const PACK_CAPACITY_KWH = 72; // assumed EV pack size
+
+/** Populate Seller/Buyer dropdowns from EVS_DATA */
+function p2pPopulateDropdowns() {
+  const sellerEl = document.getElementById('p2p-seller');
+  const buyerEl  = document.getElementById('p2p-buyer');
+  if (!sellerEl || !buyerEl) return;
+
+  [sellerEl, buyerEl].forEach((el, idx) => {
+    el.innerHTML = EVS_DATA.map((ev, i) =>
+      `<option value="${i}">${ev.id} · SoC ${ev.soc}% (${Math.round(ev.soc / 100 * PACK_CAPACITY_KWH * 10) / 10} kWh)</option>`
+    ).join('');
+    el.selectedIndex = idx === 0 ? 0 : 1; // default seller=0, buyer=1
+  });
+}
+
+/** Recompute + show seller preview bar without showing summary */
+function p2pRefreshSummary() {
+  const sellerIdx = parseInt(document.getElementById('p2p-seller').value);
+  const kWh       = parseFloat(document.getElementById('p2p-kwh').value) || 0;
+  const seller    = EVS_DATA[sellerIdx];
+  if (!seller) return;
+
+  const sellerKWh = (seller.soc / 100) * PACK_CAPACITY_KWH;
+  const afterKWh  = sellerKWh - kWh;
+  const afterSoC  = Math.max(0, (afterKWh / PACK_CAPACITY_KWH) * 100);
+
+  const preview = document.getElementById('p2p-seller-preview');
+  const bar     = document.getElementById('p2p-seller-bar');
+  const pct     = document.getElementById('p2p-seller-after-pct');
+  if (preview) {
+    preview.style.display = kWh > 0 ? '' : 'none';
+    bar.style.width       = afterSoC.toFixed(1) + '%';
+    bar.style.background  = afterSoC >= 50 ? 'var(--green2)' : afterSoC >= 20 ? 'var(--yellow)' : 'var(--red)';
+    pct.textContent       = afterSoC.toFixed(1) + '%';
+    pct.style.color       = afterSoC >= 50 ? 'var(--green2)' : afterSoC >= 20 ? '#c8900f' : 'var(--red)';
+  }
+}
+
+/** Calculate and show summary (also calls the backend /api/p2p/transfer dry-run style) */
+async function calculateP2P() {
+  const sellerIdx = parseInt(document.getElementById('p2p-seller').value);
+  const buyerIdx  = parseInt(document.getElementById('p2p-buyer').value);
+  const kWh       = parseFloat(document.getElementById('p2p-kwh').value);
+  const price     = parseFloat(document.getElementById('p2p-price').value);
+
+  const errorEl = document.getElementById('p2p-error-msg');
+  const confirmBtn = document.getElementById('p2p-confirm-btn');
+
+  // ── Frontend validations ──
+  if (sellerIdx === buyerIdx) {
+    showP2PError('Seller and Buyer must be different vehicles.');
+    return;
+  }
+  if (!kWh || kWh <= 0) { showP2PError('Enter a valid energy amount (kWh).'); return; }
+  if (!price || price <= 0) { showP2PError('Enter a valid price per kWh.'); return; }
+
+  const seller = EVS_DATA[sellerIdx];
+  const buyer  = EVS_DATA[buyerIdx];
+  const sellerKWh = (seller.soc / 100) * PACK_CAPACITY_KWH;
+
+  if (kWh > sellerKWh - 5) {   // keep 5 kWh minimum reserve for seller
+    showP2PError(`${seller.id} only has ${sellerKWh.toFixed(1)} kWh available. Max transferable: ${(sellerKWh - 5).toFixed(1)} kWh (keeping 5 kWh reserve).`);
+    return;
+  }
+
+  // ── Call backend ──
+  let serverData = null;
+  try {
+    const res = await fetch('/api/p2p/transfer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        seller_id:     seller.id,
+        buyer_id:      buyer.id,
+        seller_soc:    seller.soc,
+        buyer_soc:     buyer.soc,
+        energy_kwh:    kWh,
+        price_per_kwh: price
+      })
+    });
+    serverData = await res.json();
+    if (!res.ok) {
+      showP2PError(serverData.detail || 'Server validation failed.');
+      return;
+    }
+  } catch (e) {
+    // Backend not running — compute locally (graceful degradation)
+    console.warn('Backend unavailable, computing locally.');
+    const base = kWh * price;
+    const fee  = base * 0.05;
+    serverData = {
+      energy_kwh: kWh,
+      price_per_kwh: price,
+      base_amount: base,
+      service_fee: fee,
+      buyer_total: base + fee,
+      seller_receives: base - fee,
+      seller_soc_after: parseFloat(((sellerKWh - kWh) / PACK_CAPACITY_KWH * 100).toFixed(1)),
+      buyer_soc_after:  parseFloat((Math.min(100, (buyer.soc / 100 * PACK_CAPACITY_KWH + kWh) / PACK_CAPACITY_KWH * 100)).toFixed(1))
+    };
+  }
+
+  // ── Render Summary ──
+  document.getElementById('p2p-summary-placeholder').style.display = 'none';
+  document.getElementById('p2p-summary-content').style.display = '';
+  errorEl.style.display = 'none';
+
+  document.getElementById('sum-energy').textContent      = serverData.energy_kwh.toFixed(2) + ' kWh';
+  document.getElementById('sum-price').textContent       = '₹' + serverData.price_per_kwh.toFixed(2);
+  document.getElementById('sum-base').textContent        = '₹' + serverData.base_amount.toFixed(2);
+  document.getElementById('sum-fee').textContent         = '₹' + serverData.service_fee.toFixed(2);
+  document.getElementById('sum-seller-gets').textContent = '₹' + serverData.seller_receives.toFixed(2);
+  document.getElementById('sum-total').textContent       = '₹' + serverData.buyer_total.toFixed(2);
+  document.getElementById('sum-buyer-label').textContent = `${seller.id} → ${buyer.id} · incl. 5% fee`;
+
+  confirmBtn.disabled = false;
+  confirmBtn.dataset.sellerIdx  = sellerIdx;
+  confirmBtn.dataset.buyerIdx   = buyerIdx;
+  confirmBtn.dataset.serverData = JSON.stringify(serverData);
+
+  // Update flow visualizer
+  document.getElementById('p2p-flow-viz').style.display = 'flex';
+  document.getElementById('p2p-flow-seller').textContent = seller.id;
+  document.getElementById('p2p-flow-buyer').textContent  = buyer.id;
+
+  // Badge
+  document.getElementById('p2p-badge').textContent = '🔢 Calculated';
+  document.getElementById('p2p-badge').className   = 'badge badge-blue';
+
+  p2pRefreshSummary();
+  toast(`Transfer calculated: ${kWh} kWh from ${seller.id} → ${buyer.id}`);
+}
+
+function showP2PError(msg) {
+  document.getElementById('p2p-summary-placeholder').style.display = 'none';
+  document.getElementById('p2p-summary-content').style.display = '';
+  const errorEl = document.getElementById('p2p-error-msg');
+  errorEl.style.display = '';
+  errorEl.textContent   = '⚠️ ' + msg;
+  document.getElementById('p2p-confirm-btn').disabled = true;
+  toast(msg, 'error');
+}
+
+/** Confirm and apply transfer to EV state */
+async function confirmP2PTransfer() {
+  const btn        = document.getElementById('p2p-confirm-btn');
+  const sellerIdx  = parseInt(btn.dataset.sellerIdx);
+  const buyerIdx   = parseInt(btn.dataset.buyerIdx);
+  const serverData = JSON.parse(btn.dataset.serverData || '{}');
+  if (!serverData.energy_kwh) { toast('Please calculate first.', 'warning'); return; }
+
+  const seller = EVS_DATA[sellerIdx];
+  const buyer  = EVS_DATA[buyerIdx];
+
+  // Apply SoC changes in frontend state
+  seller.soc = parseFloat(serverData.seller_soc_after.toFixed(1));
+  buyer.soc  = parseFloat(serverData.buyer_soc_after.toFixed(1));
+  seller.range = Math.round(seller.soc * 3.4);
+  buyer.range  = Math.round(buyer.soc  * 3.4);
+
+  // Re-render EV table
+  renderEVTable();
+
+  // Add to transaction history
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' });
+  const txRow = document.createElement('div');
+  txRow.className = 'p2p-history-row';
+  txRow.innerHTML = `
+    <span class="ph-icon">🤝</span>
+    <div class="ph-info">
+      <strong>${seller.id} → ${buyer.id}</strong>
+      <span>${serverData.energy_kwh.toFixed(2)} kWh · ₹${serverData.price_per_kwh.toFixed(2)}/kWh · ${timeStr}</span>
+    </div>
+    <span class="ph-amount">₹${serverData.buyer_total.toFixed(2)}</span>
+  `;
+
+  const list = document.getElementById('p2p-history-list');
+  // Remove placeholder text on first tx
+  if (list.children.length === 1 && list.firstElementChild.tagName !== 'DIV'.toLowerCase() ||
+      list.firstElementChild.style.textAlign === 'center') {
+    list.innerHTML = '';
+  }
+  list.prepend(txRow);
+
+  // Update repopulate dropdowns with fresh SoC values
+  p2pPopulateDropdowns();
+
+  // Reset summary
+  document.getElementById('p2p-summary-content').style.display = 'none';
+  document.getElementById('p2p-summary-placeholder').style.display = '';
+  document.getElementById('p2p-seller-preview').style.display = 'none';
+  document.getElementById('p2p-flow-viz').style.display = 'none';
+
+  // Badge
+  document.getElementById('p2p-badge').textContent = '✅ Transferred';
+  document.getElementById('p2p-badge').className   = 'badge badge-green';
+  setTimeout(() => {
+    document.getElementById('p2p-badge').textContent = '● Idle';
+    document.getElementById('p2p-badge').className   = 'badge badge-grey';
+  }, 4000);
+
+  toast(`✅ Transfer confirmed! ${serverData.energy_kwh.toFixed(2)} kWh sent · Buyer paid ₹${serverData.buyer_total.toFixed(2)}`);
+}
+
+/* ──────────────────────────────────────────────
    INIT
 ────────────────────────────────────────────── */
 function init() {
@@ -1384,6 +1781,7 @@ function init() {
   buildCellGrid();
   updateSlider(80);
   updateBatteryUI(32);
+  p2pPopulateDropdowns();
 
   // Live tick — subtle stat drift every 8s
   setInterval(() => {
