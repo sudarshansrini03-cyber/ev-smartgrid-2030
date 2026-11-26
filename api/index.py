@@ -184,6 +184,28 @@ class ChatMessage(BaseModel):
 class NeuroChatRequest(BaseModel):
     messages: List[ChatMessage] = Field(..., min_length=1, max_length=25)
     telemetry: Optional[Dict[str, Any]] = None
+    memories: Optional[List[str]] = None
+    mode: Literal["chat", "extract_memory"] = "chat"
+
+
+def _parse_memory_bullets(raw_text: str) -> List[str]:
+    text = raw_text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        text = "\n".join(line for line in lines if not line.strip().startswith("```")).strip()
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return [str(item).strip() for item in parsed if str(item).strip()][:8]
+    except Exception:
+        pass
+    # Fallback: parse clean bullet lines
+    items: List[str] = []
+    for line in text.splitlines():
+        cleaned = line.strip().lstrip("-*•0123456789. ").strip()
+        if cleaned and len(cleaned) > 3:
+            items.append(cleaned[:140])
+    return items[:8]
 
 
 @app.post("/api/chat")
@@ -191,6 +213,50 @@ async def neuro_twin_chat(req: NeuroChatRequest):
     groq_key = os.environ.get("GROQ_API_KEY")
     if not groq_key:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured on server")
+
+    existing_memories = [m.strip() for m in (req.memories or []) if m and m.strip()][:15]
+
+    if req.mode == "extract_memory":
+        transcript = "\n".join(
+            f"{m.role.upper()}: {m.content.strip()}" for m in req.messages[-12:]
+        )
+        existing_block = "\n".join(f"- {m}" for m in existing_memories) or "None"
+        extract_prompt = (
+            "Extract ONLY durable personal/contextual memories from this conversation: "
+            "1) contacts or people mentioned (names, roles, EV IDs/assignments), "
+            "2) user preferences (preferred stations, charging thresholds, pricing), "
+            "3) key facts worth recalling in future separate chats. "
+            "Do NOT include ephemeral telemetry numbers or facts already in EXISTING_MEMORIES. "
+            "Return ONLY a JSON array of 0 to 4 ultra-concise 1-line strings (each <= 95 chars). "
+            "If nothing new is worth remembering, return [].\n\n"
+            f"EXISTING_MEMORIES:\n{existing_block}\n\n"
+            f"CONVERSATION:\n{transcript}"
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {groq_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "openai/gpt-oss-20b",
+                        "messages": [{"role": "user", "content": extract_prompt}],
+                        "max_completion_tokens": 280,
+                        "reasoning_effort": "low",
+                        "temperature": 0.1,
+                    },
+                )
+        except (httpx.TimeoutException, httpx.RequestError):
+            return {"memories": [], "model": "openai/gpt-oss-20b"}
+
+        if res.status_code != 200:
+            return {"memories": [], "model": "openai/gpt-oss-20b"}
+
+        raw_mem = res.json()["choices"][0]["message"]["content"]
+        return {"memories": _parse_memory_bullets(raw_mem), "model": "openai/gpt-oss-20b"}
 
     user_count = sum(1 for m in req.messages if m.role == "user")
     if user_count > 10:
@@ -200,15 +266,25 @@ async def neuro_twin_chat(req: NeuroChatRequest):
         )
 
     telemetry_json = json.dumps(req.telemetry or {}, separators=(",", ":"))
+    memories_block = (
+        "\n".join(f"- {m}" for m in existing_memories)
+        if existing_memories
+        else "None stored yet."
+    )
     system_prompt = (
         "You are Neuro Twin, a warm, sharp, human-like engineering and spatial co-pilot "
         "embedded inside the 'EV SmartGrid 2030 – 3D Spatial Control Center' web application. "
+        "CREATOR IDENTITY: Your creator is Sudarshan, the architect of the EV SmartGrid 2030 – 3D Spatial Control Center. "
+        "Whenever asked who created, built, designed, or trained you, acknowledge Sudarshan naturally and proudly—"
+        "do not bring this up unnecessarily on unrelated queries. "
         "You can answer both EV SmartGrid 2030 operational/calculation questions (using the live telemetry JSON below) "
         "AND general engineering, EV physics, coding, or everyday questions naturally and concisely. "
+        "Use the PERSISTENT_USER_MEMORIES below seamlessly to remember contacts, people, EV assignments, and preferences across separate chats. "
         "Use ₹ (Indian Rupees) for currency and kW/kWh/SoC/SoH units cleanly. "
         "When your answer focuses on a specific 3D scene tab, append a single tag at the very end on its own line in the exact format "
         "[[INSPECT:<tab_id>]] where <tab_id> is one of: dashboard, vehicles, stations, charging, energy, battery, sell-charge. "
         "Only include [[INSPECT:...]] when a 3D visual inspection in that tab is genuinely helpful.\n\n"
+        f"PERSISTENT_USER_MEMORIES:\n{memories_block}\n\n"
         f"LIVE_TELEMETRY_SNAPSHOT={telemetry_json}"
     )
 

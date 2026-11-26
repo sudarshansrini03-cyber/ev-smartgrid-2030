@@ -11,11 +11,14 @@ import {
   AlertCircle,
   X,
   Sparkles,
+  Brain,
 } from 'lucide-react';
 import { NAV_TABS } from '../../data/initialData';
 
 const STORAGE_KEY = 'neuro_twin_threads_v1';
+const MEMORIES_STORAGE_KEY = 'neuro_twin_memories';
 const MAX_USER_MESSAGES = 10;
+const MAX_MEMORIES = 15;
 
 const STARTERS_BY_TAB = {
   dashboard: [
@@ -85,6 +88,38 @@ function loadThreads() {
   }
 }
 
+function loadMemories() {
+  try {
+    const raw = localStorage.getItem(MEMORIES_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((m) => typeof m === 'string' && m.trim()).slice(0, MAX_MEMORIES)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function mergeAndCapMemories(existing, incoming) {
+  const seen = new Set();
+  const merged = [];
+  // Keep newest extracted memories prioritized first, then existing, deduplicated
+  for (const item of [...incoming, ...existing]) {
+    const clean = String(item || '')
+      .replace(/^[-*•\s]+/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!clean) continue;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(clean);
+    if (merged.length >= MAX_MEMORIES) break;
+  }
+  return merged;
+}
+
 function parseAssistantReply(rawText) {
   const tagRegex = /\[\[INSPECT:([a-z-]+)\]\]/i;
   const match = rawText.match(tagRegex);
@@ -135,6 +170,7 @@ export default function NeuroTwinDrawer({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
+  const [showMemory, setShowMemory] = useState(false);
   const [threads, setThreads] = useState(() => {
     const saved = loadThreads();
     return saved.length > 0 ? saved : [createEmptyThread()];
@@ -143,6 +179,8 @@ export default function NeuroTwinDrawer({
     const saved = loadThreads();
     return saved.length > 0 ? saved[0].id : null;
   });
+  const [memories, setMemories] = useState(() => loadMemories());
+  const [extractingMemory, setExtractingMemory] = useState(false);
   const [input, setInput] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [failedPrompt, setFailedPrompt] = useState(null);
@@ -153,6 +191,7 @@ export default function NeuroTwinDrawer({
 
   const inputRef = useRef(null);
   const scrollRef = useRef(null);
+  const lastExtractedCountRef = useRef({});
 
   // Ensure activeThreadId points to a valid thread
   const activeThread = useMemo(() => {
@@ -184,13 +223,22 @@ export default function NeuroTwinDrawer({
     }
   }, [activeThread?.messages?.length, isSending, isOpen]);
 
+  // Persist memories to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(MEMORIES_STORAGE_KEY, JSON.stringify(memories));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [memories]);
+
   // Focus input when opening
   useEffect(() => {
-    if (isOpen && !showLogs) {
+    if (isOpen && !showLogs && !showMemory) {
       const timer = setTimeout(() => inputRef.current?.focus(), 220);
       return () => clearTimeout(timer);
     }
-  }, [isOpen, showLogs]);
+  }, [isOpen, showLogs, showMemory]);
 
   // Keyboard shortcuts: Cmd+K / Ctrl+K toggle, Esc minimize
   useEffect(() => {
@@ -213,15 +261,65 @@ export default function NeuroTwinDrawer({
   );
   const limitReached = userMessageCount >= MAX_USER_MESSAGES;
 
+  const extractMemoriesFromThread = useCallback(
+    async (thread) => {
+      if (!thread || !Array.isArray(thread.messages) || thread.messages.length < 2) return;
+      const alreadyCount = lastExtractedCountRef.current[thread.id] || 0;
+      if (thread.messages.length <= alreadyCount) return;
+
+      lastExtractedCountRef.current[thread.id] = thread.messages.length;
+      const apiBase = import.meta.env.VITE_API_URL || '';
+      setExtractingMemory(true);
+      try {
+        const res = await fetch(`${apiBase}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode: 'extract_memory',
+            messages: thread.messages.map((m) => ({ role: m.role, content: m.content })),
+            memories,
+          }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (Array.isArray(data?.memories) && data.memories.length > 0) {
+          setMemories((prev) => mergeAndCapMemories(prev, data.memories));
+        }
+      } catch {
+        // Non-blocking background extraction
+      } finally {
+        setExtractingMemory(false);
+      }
+    },
+    [memories]
+  );
+
   const handleNewChat = useCallback(() => {
+    if (activeThread && activeThread.messages.length >= 2) {
+      extractMemoriesFromThread(activeThread);
+    }
     const fresh = createEmptyThread();
     setThreads((prev) => [fresh, ...prev.filter((t) => t.messages.length > 0)]);
     setActiveThreadId(fresh.id);
     setShowLogs(false);
+    setShowMemory(false);
     setErrorBanner('');
     setFailedPrompt(null);
     setTimeout(() => inputRef.current?.focus(), 100);
-  }, []);
+  }, [activeThread, extractMemoriesFromThread]);
+
+  const handleSwitchThread = useCallback(
+    (targetThreadId) => {
+      if (activeThread && activeThread.id !== targetThreadId && activeThread.messages.length >= 2) {
+        extractMemoriesFromThread(activeThread);
+      }
+      setActiveThreadId(targetThreadId);
+      setShowLogs(false);
+      setShowMemory(false);
+      setErrorBanner('');
+    },
+    [activeThread, extractMemoriesFromThread]
+  );
 
   const handleDeleteThread = useCallback(
     (id, e) => {
@@ -293,8 +391,10 @@ export default function NeuroTwinDrawer({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            mode: 'chat',
             messages: nextMessages.map((m) => ({ role: m.role, content: m.content })),
             telemetry,
+            memories,
           }),
         });
 
@@ -337,7 +437,7 @@ export default function NeuroTwinDrawer({
         setIsSending(false);
       }
     },
-    [activeThread, isSending, telemetry]
+    [activeThread, isSending, memories, telemetry]
   );
 
   const handleInspectClick = (tabId) => {
@@ -457,10 +557,10 @@ export default function NeuroTwinDrawer({
                 ease: [0.4, 0, 1, 1],
               },
             }}
-            className="fixed bottom-20 right-4 z-50 flex h-[min(600px,calc(100vh-6rem))] w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-800 bg-[#090D16]/[0.95] text-slate-100 shadow-2xl backdrop-blur-2xl sm:w-[432px] lg:bottom-6 lg:right-6 lg:h-[min(600px,calc(100vh-3rem))]"
+            className="fixed bottom-20 right-4 z-50 flex h-[min(600px,calc(100vh-6rem))] w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-800 bg-[#090D16]/[0.95] text-slate-100 shadow-2xl backdrop-blur-2xl sm:w-[476px] lg:bottom-6 lg:right-6 lg:h-[min(600px,calc(100vh-3rem))]"
           >
             {/* Header Bar */}
-            <div className="flex items-center justify-between gap-2 border-b border-slate-800/90 px-4 py-3">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-800/90 px-3.5 py-3">
               <div className="flex min-w-0 items-center gap-2">
                 <span className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-cyan-400/35 bg-slate-900">
                   <span
@@ -470,12 +570,12 @@ export default function NeuroTwinDrawer({
                     }}
                   />
                 </span>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
                   <span className="whitespace-nowrap text-sm font-semibold tracking-tight text-slate-100">
                     Neuro Twin
                   </span>
                   <span className="whitespace-nowrap rounded-full border border-slate-700/80 bg-slate-800/80 px-2 py-0.5 font-mono text-[10px] font-semibold text-cyan-300">
-                    {userMessageCount} / {MAX_USER_MESSAGES} messages
+                    {userMessageCount} / {MAX_USER_MESSAGES}
                   </span>
                 </div>
               </div>
@@ -483,7 +583,30 @@ export default function NeuroTwinDrawer({
               <div className="flex shrink-0 items-center gap-1">
                 <button
                   type="button"
-                  onClick={() => setShowLogs((s) => !s)}
+                  onClick={() => {
+                    setShowMemory((m) => !m);
+                    setShowLogs(false);
+                  }}
+                  title="Cross-Chat Memory"
+                  className={`flex items-center gap-1 whitespace-nowrap rounded-lg px-2 py-1 text-[11px] font-medium transition ${
+                    showMemory
+                      ? 'bg-emerald-500/15 text-emerald-300'
+                      : 'text-slate-400 hover:bg-slate-800/80 hover:text-slate-200'
+                  }`}
+                >
+                  <Brain
+                    className={`h-3.5 w-3.5 ${
+                      extractingMemory ? 'animate-pulse text-cyan-400' : 'text-emerald-400'
+                    }`}
+                  />
+                  <span>Memory ({memories.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowLogs((s) => !s);
+                    setShowMemory(false);
+                  }}
                   title="Conversation Logs"
                   className={`flex items-center gap-1 whitespace-nowrap rounded-lg px-2 py-1 text-[11px] font-medium transition ${
                     showLogs
@@ -514,8 +637,78 @@ export default function NeuroTwinDrawer({
               </div>
             </div>
 
-            {/* Body Area: Persistent Logs Overlay OR Active Thread */}
+            {/* Body Area: Memory Popover / Persistent Logs Overlay / Active Thread */}
             <div className="relative flex flex-1 flex-col overflow-hidden">
+              <AnimatePresence>
+                {showMemory && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.18 }}
+                    className="hud-scroll absolute inset-0 z-20 flex flex-col gap-2.5 overflow-y-auto bg-[#090D16]/[0.98] p-4"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <Brain className="h-3.5 w-3.5 text-emerald-400" />
+                        <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                          Cross-Chat Memory ({memories.length} / {MAX_MEMORIES})
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {memories.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setMemories([])}
+                            className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[10px] font-semibold text-red-300 transition hover:bg-red-500/20"
+                          >
+                            Clear All
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setShowMemory(false)}
+                          className="rounded-md p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <p className="text-[11px] leading-relaxed text-slate-400">
+                      Contacts, EV assignments, preferences, and key facts extracted automatically across threads.
+                    </p>
+
+                    {memories.length === 0 ? (
+                      <div className="mt-8 rounded-xl border border-dashed border-slate-800 p-5 text-center text-xs text-slate-500">
+                        No memories stored yet. Mention contacts, EVs, or preferences and switch threads or start a New Chat to capture them automatically.
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        {memories.map((item, idx) => (
+                          <div
+                            key={`${idx}-${item}`}
+                            className="group flex items-start justify-between gap-2 rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2.5 text-xs text-slate-200"
+                          >
+                            <span className="leading-snug">{item}</span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setMemories((prev) => prev.filter((_, i) => i !== idx))
+                              }
+                              title="Remove memory"
+                              className="shrink-0 rounded-md p-0.5 text-slate-500 transition hover:bg-red-500/15 hover:text-red-400"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
               <AnimatePresence>
                 {showLogs && (
                   <motion.div
@@ -551,11 +744,7 @@ export default function NeuroTwinDrawer({
                           return (
                             <div
                               key={t.id}
-                              onClick={() => {
-                                setActiveThreadId(t.id);
-                                setShowLogs(false);
-                                setErrorBanner('');
-                              }}
+                              onClick={() => handleSwitchThread(t.id)}
                               className={`group flex cursor-pointer items-center justify-between gap-2 rounded-xl border p-3 transition ${
                                 isCurrent
                                   ? 'border-cyan-500/40 bg-cyan-500/10'
