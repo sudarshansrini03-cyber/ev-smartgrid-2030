@@ -1,4 +1,6 @@
+import json
 import os
+from typing import Any, Dict, List, Literal, Optional
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -168,3 +170,81 @@ def p2p_transfer(req: P2PTransferRequest):
         buyer_soc_after  = buyer_soc_after,
         status           = "confirmed"
     )
+
+
+# ─────────────────────────────────────────────
+#  NEURO TWIN AI CO-PILOT  POST /api/chat
+# ─────────────────────────────────────────────
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=4000)
+
+
+class NeuroChatRequest(BaseModel):
+    messages: List[ChatMessage] = Field(..., min_length=1, max_length=25)
+    telemetry: Optional[Dict[str, Any]] = None
+
+
+@app.post("/api/chat")
+async def neuro_twin_chat(req: NeuroChatRequest):
+    groq_key = os.environ.get("GROQ_API_KEY")
+    if not groq_key:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured on server")
+
+    user_count = sum(1 for m in req.messages if m.role == "user")
+    if user_count > 10:
+        raise HTTPException(
+            status_code=429,
+            detail="Session limit reached (10/10 user messages). Start a new thread to continue."
+        )
+
+    telemetry_json = json.dumps(req.telemetry or {}, separators=(",", ":"))
+    system_prompt = (
+        "You are Neuro Twin, a warm, sharp, human-like engineering and spatial co-pilot "
+        "embedded inside the 'EV SmartGrid 2030 – 3D Spatial Control Center' web application. "
+        "You can answer both EV SmartGrid 2030 operational/calculation questions (using the live telemetry JSON below) "
+        "AND general engineering, EV physics, coding, or everyday questions naturally and concisely. "
+        "Use ₹ (Indian Rupees) for currency and kW/kWh/SoC/SoH units cleanly. "
+        "When your answer focuses on a specific 3D scene tab, append a single tag at the very end on its own line in the exact format "
+        "[[INSPECT:<tab_id>]] where <tab_id> is one of: dashboard, vehicles, stations, charging, energy, battery, sell-charge. "
+        "Only include [[INSPECT:...]] when a 3D visual inspection in that tab is genuinely helpful.\n\n"
+        f"LIVE_TELEMETRY_SNAPSHOT={telemetry_json}"
+    )
+
+    groq_messages = [{"role": "system", "content": system_prompt}] + [
+        {"role": m.role, "content": m.content} for m in req.messages[-20:]
+    ]
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            res = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {groq_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "openai/gpt-oss-20b",
+                    "messages": groq_messages,
+                    "max_completion_tokens": 800,
+                    "reasoning_effort": "low",
+                    "temperature": 0.4,
+                },
+            )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Groq AI service timed out. Please retry.")
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Network error contacting Groq API: {exc}")
+
+    if res.status_code == 429:
+        raise HTTPException(
+            status_code=429,
+            detail="Groq rate limit reached briefly. Please wait a moment and retry."
+        )
+    if res.status_code != 200:
+        raise HTTPException(status_code=res.status_code, detail=res.text)
+
+    data = res.json()
+    reply = data["choices"][0]["message"]["content"]
+    return {"reply": reply, "model": "openai/gpt-oss-20b"}

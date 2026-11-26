@@ -150,7 +150,7 @@ export default function SellChargeHUD({
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 0, x: 24 }}
         transition={{ duration: 0.28 }}
-        className="hud-scroll pointer-events-auto flex max-h-[38vh] w-full flex-col gap-3 overflow-y-auto rounded-2xl border border-slate-200/80 bg-white/75 p-4 shadow-lg backdrop-blur-xl lg:max-h-[calc(100vh-6.5rem)] lg:w-[296px]"
+        className="hud-scroll pointer-events-auto flex max-h-[38vh] w-full flex-col gap-3 overflow-y-auto rounded-2xl border border-slate-200/80 bg-white/75 p-4 shadow-lg backdrop-blur-xl lg:max-h-[calc(100vh-9.5rem)] lg:w-[296px]"
       >
         <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
           Transaction Summary

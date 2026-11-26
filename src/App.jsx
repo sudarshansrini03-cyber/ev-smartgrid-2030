@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import SpatialCanvas from './components/three/SpatialCanvas';
 import LoadingOverlay from './components/LoadingOverlay';
 import NavigationRail from './components/hud/NavigationRail';
 import ToastContainer from './components/hud/ToastContainer';
+import NeuroTwinDrawer from './components/hud/NeuroTwinDrawer';
 import DashboardHUD from './components/hud/panels/DashboardHUD';
 import VehiclesHUD from './components/hud/panels/VehiclesHUD';
 import StationsHUD from './components/hud/panels/StationsHUD';
@@ -15,6 +16,7 @@ import {
   CHARGING_STATIONS_OPTIONS,
   INITIAL_EVS,
   PACK_CAPACITY_KWH,
+  STATIONS_DATA,
   generateBatteryCells,
 } from './data/initialData';
 
@@ -512,6 +514,78 @@ export default function App() {
   const sellerVehicle = vehicles[p2pState.sellerIdx] || vehicles[0];
   const buyerVehicle = vehicles[p2pState.buyerIdx] || vehicles[1] || vehicles[0];
 
+  const neuroTelemetry = useMemo(
+    () => ({
+      active_tab: activeTab,
+      kpis: stats,
+      energy_grid: {
+        solar_mw: energyMetrics.solarMw,
+        grid_mw: energyMetrics.gridMw,
+        battery_reserve_kwh: energyMetrics.battReserveKwh,
+        load_bars: loadBars,
+        routing_splits: energyRoutes.map((r) => ({ channel: r.title, pct: r.pct })),
+      },
+      stations: STATIONS_DATA.map((s) => ({
+        id: s.id,
+        name: s.name,
+        distance_km: s.distanceKm,
+        free_chargers: s.freeChargers,
+        queue_evs: s.queue,
+        max_power_kw: s.maxPowerKw,
+        avg_wait_min: s.avgWaitMin,
+        score_pct: s.score,
+      })),
+      fleet: vehicles.map((v) => ({
+        id: v.id,
+        model: v.model,
+        soc_pct: v.soc,
+        station: v.station,
+        range_km: v.range,
+        rate: v.rate,
+        status: v.status,
+      })),
+      charging_session: {
+        vehicle_id: chargingState.selectedVehicleId,
+        station_kw: chargingState.stationKw,
+        current_soc_pct: chargingState.currentSoC,
+        target_soc_pct: chargingState.targetSoC,
+        energy_used_kwh: +chargingState.energyUsed.toFixed(2),
+        est_cost_inr: chargingState.estCost,
+        is_charging: chargingState.isCharging,
+      },
+      dual_bank_battery: {
+        bank_alpha: { allocation_pct: 80, soh_pct: 94, cycles: 1247, temp_c: 28 },
+        bank_beta: { allocation_pct: 20, soh_pct: 98, cycles: 382, temp_c: 24 },
+        flagged_cells_under_60: batteryCells
+          .filter((c) => c.soh < 60)
+          .map((c) => ({ id: c.id, soh: c.soh, temp: c.temp, voltage: c.voltage })),
+      },
+      p2p_rules: {
+        pack_capacity_kwh: PACK_CAPACITY_KWH,
+        platform_fee_pct: 5,
+        min_seller_reserve_kwh: 5,
+        current_seller: sellerVehicle?.id,
+        current_buyer: buyerVehicle?.id,
+        energy_kwh: p2pState.energyKwh,
+        price_per_kwh_inr: p2pState.pricePerKwh,
+      },
+    }),
+    [
+      activeTab,
+      stats,
+      energyMetrics,
+      loadBars,
+      energyRoutes,
+      vehicles,
+      chargingState,
+      batteryCells,
+      sellerVehicle?.id,
+      buyerVehicle?.id,
+      p2pState.energyKwh,
+      p2pState.pricePerKwh,
+    ]
+  );
+
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-[#F8FAFC] text-slate-900">
       <LoadingOverlay canvasReady={canvasReady} />
@@ -663,6 +737,14 @@ export default function App() {
           />
         )}
       </AnimatePresence>
+
+      {/* Neuro Twin Obsidian Glass AI Drawer & Trigger Pill */}
+      <NeuroTwinDrawer
+        activeTab={activeTab}
+        telemetry={neuroTelemetry}
+        onInspectTab={handleSelectTab}
+        onShowToast={addToast}
+      />
     </div>
   );
 }
