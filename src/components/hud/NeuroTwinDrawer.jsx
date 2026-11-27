@@ -18,6 +18,7 @@ import {
   SquarePen,
   History,
   Check,
+  CheckCircle2,
 } from 'lucide-react';
 import { NAV_TABS } from '../../data/initialData';
 
@@ -27,6 +28,7 @@ const MODEL_STORAGE_KEY = 'neuro_twin_model_v1';
 const MAX_USER_MESSAGES = 10;
 const MAX_MEMORIES = 15;
 const MAX_FILE_CHARS = 4500;
+const MAX_IMAGES = 3;
 const VISION_MODEL_ID = 'qwen/qwen3.8-27b';
 
 const GROQ_MODELS = [
@@ -172,8 +174,22 @@ function mergeAndCapMemories(existing, incoming) {
 }
 
 function parseAssistantReply(rawText) {
+  let working = rawText || '';
+
+  // Parse [[ADD_EV:{...}]] action tag if present
+  let addEvPayload = null;
+  const addEvMatch = working.match(/\[\[ADD_EV:(\{[\s\S]*?\})\]\]/i);
+  if (addEvMatch) {
+    try {
+      addEvPayload = JSON.parse(addEvMatch[1]);
+    } catch {
+      addEvPayload = null;
+    }
+    working = working.replace(/\[\[ADD_EV:\{[\s\S]*?\}\]\]/gi, '').trim();
+  }
+
   const tagRegex = /\[\[INSPECT:([a-z-]+)\]\]/i;
-  const match = rawText.match(tagRegex);
+  const match = working.match(tagRegex);
   let inspectTab = null;
   if (match) {
     const candidate = match[1].toLowerCase();
@@ -181,9 +197,9 @@ function parseAssistantReply(rawText) {
       inspectTab = candidate;
     }
   }
-  const cleanText = rawText.replace(/\[\[INSPECT:[a-z-]+\]\]/gi, '').trim();
+  const cleanText = working.replace(/\[\[INSPECT:[a-z-]+\]\]/gi, '').trim();
 
-  if (!inspectTab) {
+  if (!inspectTab && !addEvPayload) {
     const lower = cleanText.toLowerCase();
     if (lower.includes('bank alpha') || lower.includes('flagged cell') || lower.includes('bank beta')) {
       inspectTab = 'battery';
@@ -196,7 +212,7 @@ function parseAssistantReply(rawText) {
     }
   }
 
-  return { cleanText, inspectTab };
+  return { cleanText, inspectTab, addEvPayload };
 }
 
 function formatThreadTime(iso) {
@@ -265,6 +281,7 @@ export default function NeuroTwinDrawer({
   activeTab,
   telemetry,
   onInspectTab,
+  onAddVehicleFromAI,
   onShowToast,
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
@@ -295,8 +312,9 @@ export default function NeuroTwinDrawer({
   const [autoSwitchedToVision, setAutoSwitchedToVision] = useState(false);
 
   const [input, setInput] = useState('');
-  const [attachedImage, setAttachedImage] = useState(null); // { name, dataUrl }
-  const [attachedFile, setAttachedFile] = useState(null); // { name, text, sizeLabel }
+  const [attachedImages, setAttachedImages] = useState([]); // Array<{ id, name, dataUrl }>
+  const [imageLimitHint, setImageLimitHint] = useState('');
+  const [attachedFile, setAttachedFile] = useState(null); // { name, text, base64 }
   const [isSending, setIsSending] = useState(false);
   const [extractingMemory, setExtractingMemory] = useState(false);
   const [failedRequest, setFailedRequest] = useState(null);
@@ -475,24 +493,51 @@ export default function NeuroTwinDrawer({
   );
 
   const handleImageUpload = async (e) => {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files || []);
     e.target.value = '';
-    if (!file) return;
-    if (file.size > 15 * 1024 * 1024) {
-      if (onShowToast) onShowToast('Image must be under 15 MB', 'warning');
+    if (files.length === 0) return;
+
+    const slotsLeft = MAX_IMAGES - attachedImages.length;
+    if (slotsLeft <= 0) {
+      setImageLimitHint('Maximum 3 images per message reached.');
+      setShowAttachMenu(false);
       return;
     }
-    try {
-      const compressedDataUrl = await compressImageToJpegBase64(file, 1280, 0.85);
-      setAttachedImage({ name: file.name, dataUrl: compressedDataUrl });
+
+    let hintMsg = '';
+    if (files.length > slotsLeft) {
+      hintMsg = `Maximum ${MAX_IMAGES} images per message — extra file${files.length - slotsLeft > 1 ? 's' : ''} skipped.`;
+    }
+
+    const candidates = files.slice(0, slotsLeft);
+    const newlyCompressed = [];
+
+    for (const file of candidates) {
+      if (file.size > 15 * 1024 * 1024) {
+        hintMsg = `${file.name} skipped (must be under 15 MB).`;
+        continue;
+      }
+      try {
+        const compressedDataUrl = await compressImageToJpegBase64(file, 1280, 0.85);
+        newlyCompressed.push({
+          id: `img-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          name: file.name,
+          dataUrl: compressedDataUrl,
+        });
+      } catch {
+        hintMsg = `Unable to process ${file.name}.`;
+      }
+    }
+
+    if (newlyCompressed.length > 0) {
+      setAttachedImages((prev) => [...prev, ...newlyCompressed].slice(0, MAX_IMAGES));
       if (selectedModel !== VISION_MODEL_ID) {
         setSelectedModel(VISION_MODEL_ID);
         setAutoSwitchedToVision(true);
       }
-      setShowAttachMenu(false);
-    } catch {
-      if (onShowToast) onShowToast('Unable to process screenshot image', 'error');
     }
+    setImageLimitHint(hintMsg);
+    setShowAttachMenu(false);
   };
 
   const handleFileUpload = (e) => {
@@ -542,27 +587,35 @@ export default function NeuroTwinDrawer({
       if (isSending || !activeThread) return;
 
       const text = (retryPayload ? retryPayload.text : promptText || '').trim();
-      const imgObj = retryPayload ? retryPayload.image : attachedImage;
+      const imgs = retryPayload ? retryPayload.images || [] : attachedImages;
       const fileObj = retryPayload ? retryPayload.file : attachedFile;
       const modelToUse = retryPayload
         ? retryPayload.model
-        : imgObj
+        : imgs.length > 0
         ? VISION_MODEL_ID
         : selectedModel;
 
       const effectivePrompt =
-        text || (imgObj ? 'Analyze this screenshot in detail.' : fileObj ? `Analyze ${fileObj.name}.` : '');
+        text ||
+        (imgs.length > 0
+          ? imgs.length > 1
+            ? `Analyze these ${imgs.length} screenshots in detail.`
+            : 'Analyze this screenshot in detail.'
+          : fileObj
+          ? `Analyze ${fileObj.name}.`
+          : '');
       if (!effectivePrompt) return;
 
       const currentUserCount = activeThread.messages.filter((m) => m.role === 'user').length;
       if (!retryPayload && currentUserCount >= MAX_USER_MESSAGES) return;
 
-      const shouldResetVision = !retryPayload && Boolean(imgObj) && autoSwitchedToVision;
+      const shouldResetVision = !retryPayload && imgs.length > 0 && autoSwitchedToVision;
 
       setErrorBanner('');
       setFailedRequest(null);
       setShowAttachMenu(false);
       setShowModelMenu(false);
+      setImageLimitHint('');
 
       let nextMessages = activeThread.messages;
       if (!retryPayload) {
@@ -570,8 +623,7 @@ export default function NeuroTwinDrawer({
           id: `msg-${Date.now()}`,
           role: 'user',
           content: effectivePrompt,
-          imagePreview: imgObj?.dataUrl || null,
-          imageName: imgObj?.name || null,
+          imagePreviews: imgs.map((i) => ({ name: i.name, dataUrl: i.dataUrl })),
           fileName: fileObj?.name || null,
           ts: new Date().toISOString(),
         };
@@ -597,7 +649,7 @@ export default function NeuroTwinDrawer({
           )
         );
         setInput('');
-        setAttachedImage(null);
+        setAttachedImages([]);
         setAttachedFile(null);
       }
 
@@ -616,7 +668,8 @@ export default function NeuroTwinDrawer({
             messages: nextMessages.map((m) => ({ role: m.role, content: m.content })),
             telemetry,
             memories: activeMemories,
-            image_base64: imgObj?.dataUrl || null,
+            images_base64: imgs.length > 0 ? imgs.map((i) => i.dataUrl) : null,
+            image_base64: imgs[0]?.dataUrl || null,
             file_text: fileObj?.text || null,
             file_base64: fileObj?.base64 || null,
             file_name: fileObj?.name || null,
@@ -643,12 +696,20 @@ export default function NeuroTwinDrawer({
           throw new Error(msg);
         }
 
-        const { cleanText, inspectTab } = parseAssistantReply(data.reply || '');
+        const { cleanText, inspectTab, addEvPayload } = parseAssistantReply(data.reply || '');
+        let addedVehicle = null;
+        if (addEvPayload && onAddVehicleFromAI) {
+          addedVehicle = onAddVehicleFromAI(addEvPayload);
+        }
+
         const assistantMsg = {
           id: `msg-${Date.now()}-ai`,
           role: 'assistant',
           content: cleanText,
-          inspectTab,
+          inspectTab: addedVehicle ? 'vehicles' : inspectTab,
+          addedVehicle: addedVehicle
+            ? { id: addedVehicle.id, model: addedVehicle.model }
+            : null,
           modelUsed: data.model_used || data.model || modelToUse,
           ts: new Date().toISOString(),
         };
@@ -676,7 +737,7 @@ export default function NeuroTwinDrawer({
         setErrorBanner(err.message || 'Unable to reach Neuro Twin backend.');
         setFailedRequest({
           text: effectivePrompt,
-          image: imgObj,
+          images: imgs,
           file: fileObj,
           model: modelToUse,
         });
@@ -687,11 +748,12 @@ export default function NeuroTwinDrawer({
     [
       activeThread,
       attachedFile,
-      attachedImage,
+      attachedImages,
       autoSwitchedToVision,
       extractMemoriesFromMessages,
       isSending,
       memories,
+      onAddVehicleFromAI,
       selectedModel,
       telemetry,
     ]
@@ -713,6 +775,7 @@ export default function NeuroTwinDrawer({
       <input
         ref={imageInputRef}
         type="file"
+        multiple
         accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
         onChange={handleImageUpload}
         className="hidden"
@@ -1094,13 +1157,27 @@ export default function NeuroTwinDrawer({
                               : 'text-slate-200'
                           }`}
                         >
-                          {isUser && msg.imagePreview && (
-                            <img
-                              src={msg.imagePreview}
-                              alt={msg.imageName || 'Uploaded screenshot'}
-                              className="mb-2 max-h-40 w-auto rounded-xl border border-slate-700/60 object-contain"
-                            />
-                          )}
+                          {isUser &&
+                            (msg.imagePreviews?.length > 0 ? (
+                              <div className="mb-2 flex flex-wrap gap-1.5">
+                                {msg.imagePreviews.map((img, i) => (
+                                  <img
+                                    key={i}
+                                    src={img.dataUrl}
+                                    alt={img.name || `Screenshot ${i + 1}`}
+                                    className="max-h-28 w-auto rounded-xl border border-slate-700/60 object-cover"
+                                  />
+                                ))}
+                              </div>
+                            ) : (
+                              msg.imagePreview && (
+                                <img
+                                  src={msg.imagePreview}
+                                  alt={msg.imageName || 'Uploaded screenshot'}
+                                  className="mb-2 max-h-40 w-auto rounded-xl border border-slate-700/60 object-contain"
+                                />
+                              )
+                            ))}
                           {isUser && msg.fileName && (
                             <div className="mb-1.5 inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] font-medium text-cyan-300">
                               <FileText className="h-3 w-3" />
@@ -1112,6 +1189,15 @@ export default function NeuroTwinDrawer({
                             <div className="whitespace-pre-wrap">{msg.content}</div>
                           ) : (
                             <FormattedResponse content={msg.content} />
+                          )}
+
+                          {!isUser && msg.addedVehicle && (
+                            <div className="mt-2.5 inline-flex items-center gap-1.5 rounded-lg border border-emerald-400/35 bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold text-emerald-300">
+                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                              <span>
+                                Added {msg.addedVehicle.model} ({msg.addedVehicle.id}) to 3D Fleet
+                              </span>
+                            </div>
                           )}
 
                           {!isUser && (targetTabObj || msg.modelUsed) && (
@@ -1268,33 +1354,43 @@ export default function NeuroTwinDrawer({
                   className="rounded-3xl border border-slate-700/70 bg-[#131824] px-3 py-2 shadow-lg focus-within:border-cyan-500/50"
                 >
                   {/* Attachment Preview Chips */}
-                  {(attachedImage || attachedFile || autoSwitchedToVision) && (
+                  {(attachedImages.length > 0 ||
+                    attachedFile ||
+                    autoSwitchedToVision ||
+                    imageLimitHint) && (
                     <div className="mb-2 flex flex-wrap items-center gap-2 px-1">
-                      {attachedImage && (
-                        <div className="relative flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/90 p-1 pr-2">
+                      {attachedImages.map((img) => (
+                        <div
+                          key={img.id}
+                          className="relative flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/90 p-1 pr-2"
+                        >
                           <img
-                            src={attachedImage.dataUrl}
-                            alt={attachedImage.name}
+                            src={img.dataUrl}
+                            alt={img.name}
                             className="h-8 w-8 rounded-lg object-cover"
                           />
-                          <span className="max-w-[110px] truncate text-[10px] font-medium text-slate-200">
-                            {attachedImage.name}
+                          <span className="max-w-[90px] truncate text-[10px] font-medium text-slate-200">
+                            {img.name}
                           </span>
                           <button
                             type="button"
                             onClick={() => {
-                              setAttachedImage(null);
-                              if (autoSwitchedToVision) {
-                                setSelectedModel('openai/gpt-oss-20b');
-                                setAutoSwitchedToVision(false);
-                              }
+                              setImageLimitHint('');
+                              setAttachedImages((prev) => {
+                                const next = prev.filter((item) => item.id !== img.id);
+                                if (next.length === 0 && autoSwitchedToVision) {
+                                  setSelectedModel('openai/gpt-oss-20b');
+                                  setAutoSwitchedToVision(false);
+                                }
+                                return next;
+                              });
                             }}
                             className="rounded-full p-0.5 text-slate-400 hover:bg-white/10 hover:text-white"
                           >
                             <X className="h-3 w-3" />
                           </button>
                         </div>
-                      )}
+                      ))}
 
                       {attachedFile && (
                         <div className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900/90 px-2.5 py-1 text-[10px] font-medium text-emerald-300">
@@ -1313,6 +1409,12 @@ export default function NeuroTwinDrawer({
                       {autoSwitchedToVision && (
                         <span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-medium text-cyan-300">
                           Auto-switched to Vision
+                        </span>
+                      )}
+
+                      {imageLimitHint && (
+                        <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-300">
+                          {imageLimitHint}
                         </span>
                       )}
                     </div>
@@ -1376,7 +1478,7 @@ export default function NeuroTwinDrawer({
                         disabled={
                           limitReached ||
                           isSending ||
-                          (!input.trim() && !attachedImage && !attachedFile)
+                          (!input.trim() && attachedImages.length === 0 && !attachedFile)
                         }
                         className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-cyan-400 to-emerald-400 text-slate-950 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-35"
                       >

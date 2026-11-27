@@ -215,6 +215,7 @@ class NeuroChatRequest(BaseModel):
     mode: Literal["chat", "extract_memory"] = "chat"
     model: AllowedNeuroModel = "openai/gpt-oss-20b"
     image_base64: Optional[str] = Field(default=None, max_length=6_000_000)
+    images_base64: Optional[List[str]] = Field(default=None, max_length=3)
     file_text: Optional[str] = Field(default=None, max_length=10000)
     file_base64: Optional[str] = Field(default=None, max_length=8_000_000)
     file_name: Optional[str] = Field(default=None, max_length=160)
@@ -401,12 +402,21 @@ async def neuro_twin_chat(req: NeuroChatRequest):
         "Use ₹ (Indian Rupees) for currency and kW/kWh/SoC/SoH units cleanly. "
         "When your answer focuses on a specific 3D scene tab, append a single tag at the very end on its own line in the exact format "
         "[[INSPECT:<tab_id>]] where <tab_id> is one of: dashboard, vehicles, stations, charging, energy, battery, sell-charge. "
-        "Only include [[INSPECT:...]] when a 3D visual inspection in that tab is genuinely helpful.\n\n"
+        "Only include [[INSPECT:...]] when a 3D visual inspection in that tab is genuinely helpful. "
+        "CONVERSATIONAL VEHICLE REGISTRATION: Whenever the user asks you to add, register, or onboard an EV vehicle into the fleet "
+        "(e.g. 'Add my Porsche Taycan for Sudarshan at Powai with 75% battery'), confirm clearly in prose and append an exact JSON action tag "
+        "at the very end on its own line: "
+        "[[ADD_EV:{\"model\":\"...\",\"owner\":\"...\",\"soc\":75,\"station\":\"C - Powai\",\"status\":\"Charging\",\"chargeRate\":120,\"range\":340}]] "
+        "using realistic defaults for any omitted fields (station one of 'A - Andheri', 'B - BKC', 'C - Powai'; status 'Charging', 'Connected', or 'Ready'; "
+        "default soc 65, realistic range in km, realistic chargeRate in kW).\n\n"
         f"PERSISTENT_USER_MEMORY:\n{memories_block}\n\n"
         f"LIVE_TELEMETRY_SNAPSHOT={telemetry_json}"
     )
 
     extracted_doc_text = _extract_document_text(req.file_name, req.file_text, req.file_base64)
+    all_images = [img for img in (req.images_base64 or []) if img][:3]
+    if not all_images and req.image_base64:
+        all_images = [req.image_base64]
 
     trimmed_history = req.messages[-20:]
     groq_messages: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
@@ -418,23 +428,18 @@ async def neuro_twin_chat(req: NeuroChatRequest):
             label = req.file_name or "attached_file"
             text_content = f"{text_content}\n\n[Attached File: {label}]\n{extracted_doc_text}"
 
-        if is_last_user and req.image_base64:
-            img_url = req.image_base64
-            if not img_url.startswith("data:image/"):
-                img_url = f"data:image/jpeg;base64,{img_url}"
-            groq_messages.append(
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": text_content},
-                        {"type": "image_url", "image_url": {"url": img_url}},
-                    ],
-                }
-            )
+        if is_last_user and all_images:
+            content_parts: List[Dict[str, Any]] = [{"type": "text", "text": text_content}]
+            for raw_img in all_images:
+                img_url = raw_img
+                if not img_url.startswith("data:image/"):
+                    img_url = f"data:image/jpeg;base64,{img_url}"
+                content_parts.append({"type": "image_url", "image_url": {"url": img_url}})
+            groq_messages.append({"role": "user", "content": content_parts})
         else:
             groq_messages.append({"role": m.role, "content": text_content})
 
-    if req.image_base64:
+    if all_images:
         candidate_models = []
         if req.model in VISION_FALLBACK_MODELS:
             candidate_models.append(req.model)
@@ -487,7 +492,7 @@ async def neuro_twin_chat(req: NeuroChatRequest):
         last_error_detail = res.text
         lower_err = res.text.lower()
         is_model_fallback_eligible = (
-            req.image_base64
+            bool(all_images)
             and res.status_code in (400, 403, 404)
             and any(
                 token in lower_err

@@ -194,28 +194,59 @@ export default function App() {
   };
 
   // ── 2. Vehicles Handlers ──
-  const handleAddVehicle = () => {
-    const stations = ['A – Andheri', 'B – BKC', 'C – Powai', 'A – Andheri'];
-    const statuses = ['Charging', 'Connected', 'Ready'];
-    const models = ['Tata Nexon EV', 'MG ZS EV', 'Hyundai Ioniq 5', 'Kia EV6', 'BYD Atto 3'];
-    const rates = ['80 kW', '120 kW', '60 kW'];
-    const owners = ['Arjun T.', 'Meera V.', 'Suresh N.', 'Kavya P.', 'Rajan D.'];
-    const soc = Math.floor(Math.random() * 70) + 15;
-    const id = `EV-${evCounterRef.current++}`;
-    const newEv = {
-      id,
-      model: models[Math.floor(Math.random() * models.length)],
-      soc,
-      station: stations[Math.floor(Math.random() * stations.length)],
-      range: Math.floor(soc * 3.4),
-      rate: rates[Math.floor(Math.random() * rates.length)],
-      status: statuses[Math.floor(Math.random() * statuses.length)],
-      owner: owners[Math.floor(Math.random() * owners.length)],
-    };
-    setVehicles((prev) => [...prev, newEv]);
-    setSelectedVehicleId(id);
-    addToast(`${newEv.id} added to fleet · SoC: ${newEv.soc}% · Station ${newEv.station}`);
+  const normalizeStationLabel = (rawStation) => {
+    const s = String(rawStation || '').toLowerCase();
+    if (s.includes('powai') || s.startsWith('c')) return 'C – Powai';
+    if (s.includes('bkc') || s.includes('bandra') || s.startsWith('b')) return 'B – BKC';
+    return 'A – Andheri';
   };
+
+  const registerVehicle = useCallback(
+    (input, { switchToVehiclesTab = false } = {}) => {
+      const soc = Math.min(100, Math.max(5, Math.round(Number(input?.soc ?? 65))));
+      const station = normalizeStationLabel(input?.station);
+      const validStatuses = ['Charging', 'Connected', 'Ready'];
+      const status = validStatuses.includes(input?.status) ? input.status : 'Charging';
+      const defaultKw = station.startsWith('B') ? 120 : station.startsWith('C') ? 60 : 80;
+      const numericKw = parseInt(String(input?.chargeRate || input?.rate || defaultKw), 10) || defaultKw;
+      const range =
+        Number(input?.range) > 0 ? Math.round(Number(input.range)) : Math.round((soc / 100) * 420);
+
+      let assignedId = String(input?.id || '').trim();
+      if (!assignedId) {
+        assignedId = `EV-${evCounterRef.current++}`;
+      } else {
+        const numMatch = assignedId.match(/(\d+)$/);
+        if (numMatch) {
+          const n = parseInt(numMatch[1], 10);
+          if (n >= evCounterRef.current) evCounterRef.current = n + 1;
+        }
+      }
+
+      const exists = vehicles.some((v) => v.id.toLowerCase() === assignedId.toLowerCase());
+      const uniqueId = exists ? `EV-${evCounterRef.current++}` : assignedId;
+      const newEv = {
+        id: uniqueId,
+        model: String(input?.model || 'Custom EV').trim(),
+        soc,
+        station,
+        range,
+        rate: `${numericKw} kW`,
+        status,
+        owner: String(input?.owner || 'Sudarshan').trim(),
+      };
+
+      setVehicles((prev) => [...prev, newEv]);
+      setSelectedVehicleId(newEv.id);
+      if (switchToVehiclesTab) {
+        setActiveTab('vehicles');
+        setCustomFocus(null);
+      }
+      addToast(`${newEv.id} (${newEv.model}) added · SoC: ${soc}% · Station ${station}`);
+      return newEv;
+    },
+    [addToast, vehicles]
+  );
 
   // ── 3. Stations Handlers ──
   const handleFindStations = () => {
@@ -656,8 +687,9 @@ export default function App() {
             key="hud-vehicles"
             vehicles={vehicles}
             selectedVehicleId={selectedVehicleId}
+            nextVehicleId={`EV-${evCounterRef.current}`}
             onSelectVehicle={setSelectedVehicleId}
-            onAddVehicle={handleAddVehicle}
+            onAddVehicle={(evInput) => registerVehicle(evInput)}
           />
         )}
 
@@ -746,6 +778,7 @@ export default function App() {
         activeTab={activeTab}
         telemetry={neuroTelemetry}
         onInspectTab={handleSelectTab}
+        onAddVehicleFromAI={(evData) => registerVehicle(evData, { switchToVehiclesTab: true })}
         onShowToast={addToast}
       />
     </div>
