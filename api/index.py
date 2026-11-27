@@ -178,7 +178,14 @@ def p2p_transfer(req: P2PTransferRequest):
 
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant"]
-    content: str = Field(..., min_length=1, max_length=4000)
+    content: str = Field(..., min_length=1, max_length=8000)
+
+
+AllowedNeuroModel = Literal[
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+    "qwen/qwen-3.8-27b",
+]
 
 
 class NeuroChatRequest(BaseModel):
@@ -186,6 +193,10 @@ class NeuroChatRequest(BaseModel):
     telemetry: Optional[Dict[str, Any]] = None
     memories: Optional[List[str]] = None
     mode: Literal["chat", "extract_memory"] = "chat"
+    model: AllowedNeuroModel = "openai/gpt-oss-20b"
+    image_base64: Optional[str] = Field(default=None, max_length=6_000_000)
+    file_text: Optional[str] = Field(default=None, max_length=8000)
+    file_name: Optional[str] = Field(default=None, max_length=160)
 
 
 def _parse_memory_bullets(raw_text: str) -> List[str]:
@@ -277,36 +288,68 @@ async def neuro_twin_chat(req: NeuroChatRequest):
         "CREATOR IDENTITY: Your creator is Sudarshan, the architect of the EV SmartGrid 2030 – 3D Spatial Control Center. "
         "Whenever asked who created, built, designed, or trained you, acknowledge Sudarshan naturally and proudly—"
         "do not bring this up unnecessarily on unrelated queries. "
-        "You can answer both EV SmartGrid 2030 operational/calculation questions (using the live telemetry JSON below) "
-        "AND general engineering, EV physics, coding, or everyday questions naturally and concisely. "
-        "Use the PERSISTENT_USER_MEMORIES below seamlessly to remember contacts, people, EV assignments, and preferences across separate chats. "
+        "CRITICAL: You DO have persistent cross-chat memory via PERSISTENT_USER_MEMORY below. "
+        "NEVER say you lack access to prior conversations. Whenever asked about previous chats, contacts, or saved facts, "
+        "directly use the items in PERSISTENT_USER_MEMORY (or state clearly if empty). "
+        "You can answer both EV SmartGrid 2030 operational/calculation questions (using the live telemetry JSON below), "
+        "uploaded screenshots/files, AND general engineering, EV physics, coding, or everyday questions naturally and concisely. "
+        "FORMATTING RULE: NEVER output raw markdown pipe tables (| col | col |). "
+        "Always format structured comparisons, breakdowns, and metrics using crisp bulleted lists with **bold lead-ins**. "
         "Use ₹ (Indian Rupees) for currency and kW/kWh/SoC/SoH units cleanly. "
         "When your answer focuses on a specific 3D scene tab, append a single tag at the very end on its own line in the exact format "
         "[[INSPECT:<tab_id>]] where <tab_id> is one of: dashboard, vehicles, stations, charging, energy, battery, sell-charge. "
         "Only include [[INSPECT:...]] when a 3D visual inspection in that tab is genuinely helpful.\n\n"
-        f"PERSISTENT_USER_MEMORIES:\n{memories_block}\n\n"
+        f"PERSISTENT_USER_MEMORY:\n{memories_block}\n\n"
         f"LIVE_TELEMETRY_SNAPSHOT={telemetry_json}"
     )
 
-    groq_messages = [{"role": "system", "content": system_prompt}] + [
-        {"role": m.role, "content": m.content} for m in req.messages[-20:]
-    ]
+    selected_model = "qwen/qwen-3.8-27b" if req.image_base64 else req.model
+
+    trimmed_history = req.messages[-20:]
+    groq_messages: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+
+    for idx, m in enumerate(trimmed_history):
+        is_last_user = idx == len(trimmed_history) - 1 and m.role == "user"
+        text_content = m.content
+        if is_last_user and req.file_text:
+            clipped_file = req.file_text[:4000]
+            label = req.file_name or "attached_file"
+            text_content = f"{text_content}\n\n[Attached File: {label}]\n{clipped_file}"
+
+        if is_last_user and req.image_base64:
+            img_url = req.image_base64
+            if not img_url.startswith("data:image/"):
+                img_url = f"data:image/png;base64,{img_url}"
+            groq_messages.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": text_content},
+                        {"type": "image_url", "image_url": {"url": img_url}},
+                    ],
+                }
+            )
+        else:
+            groq_messages.append({"role": m.role, "content": text_content})
+
+    payload: Dict[str, Any] = {
+        "model": selected_model,
+        "messages": groq_messages,
+        "max_completion_tokens": 900,
+        "temperature": 0.4,
+    }
+    if selected_model.startswith("openai/gpt-oss"):
+        payload["reasoning_effort"] = "low"
 
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=25.0) as client:
             res = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={
                     "Authorization": f"Bearer {groq_key}",
                     "Content-Type": "application/json",
                 },
-                json={
-                    "model": "openai/gpt-oss-20b",
-                    "messages": groq_messages,
-                    "max_completion_tokens": 800,
-                    "reasoning_effort": "low",
-                    "temperature": 0.4,
-                },
+                json=payload,
             )
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="Groq AI service timed out. Please retry.")
@@ -323,4 +366,4 @@ async def neuro_twin_chat(req: NeuroChatRequest):
 
     data = res.json()
     reply = data["choices"][0]["message"]["content"]
-    return {"reply": reply, "model": "openai/gpt-oss-20b"}
+    return {"reply": reply, "model": selected_model}

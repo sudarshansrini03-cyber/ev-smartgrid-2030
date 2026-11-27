@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   Send,
   Plus,
-  History,
+  Menu,
   Minimize2,
   Trash2,
   RotateCcw,
@@ -12,13 +12,27 @@ import {
   X,
   Sparkles,
   Brain,
+  ChevronDown,
+  Image as ImageIcon,
+  FileText,
+  SquarePen,
+  History,
+  Check,
 } from 'lucide-react';
 import { NAV_TABS } from '../../data/initialData';
 
 const STORAGE_KEY = 'neuro_twin_threads_v1';
 const MEMORIES_STORAGE_KEY = 'neuro_twin_memories';
+const MODEL_STORAGE_KEY = 'neuro_twin_model_v1';
 const MAX_USER_MESSAGES = 10;
 const MAX_MEMORIES = 15;
+const MAX_FILE_CHARS = 4000;
+
+const GROQ_MODELS = [
+  { id: 'openai/gpt-oss-20b', label: 'Fast', desc: 'Fast · Default' },
+  { id: 'openai/gpt-oss-120b', label: 'Deep', desc: 'Reasoning' },
+  { id: 'qwen/qwen-3.8-27b', label: 'Vision', desc: 'Screenshots & Images' },
+];
 
 const STARTERS_BY_TAB = {
   dashboard: [
@@ -61,7 +75,7 @@ const STARTERS_BY_TAB = {
 function getTimeGreeting() {
   const hour = new Date().getHours();
   if (hour >= 5 && hour <= 11) return 'What’s on your mind, early bird?';
-  if (hour >= 12 && hour <= 17) return 'Where should we start from?';
+  if (hour >= 12 && hour <= 17) return 'Where should we start?';
   if (hour >= 18 && hour <= 23) return 'What are we optimizing tonight?';
   return 'Burning the midnight oil?';
 }
@@ -101,10 +115,19 @@ function loadMemories() {
   }
 }
 
+function loadSavedModel() {
+  try {
+    const saved = localStorage.getItem(MODEL_STORAGE_KEY);
+    if (GROQ_MODELS.some((m) => m.id === saved)) return saved;
+  } catch {
+    // ignore
+  }
+  return GROQ_MODELS[0].id;
+}
+
 function mergeAndCapMemories(existing, incoming) {
   const seen = new Set();
   const merged = [];
-  // Keep newest extracted memories prioritized first, then existing, deduplicated
   for (const item of [...incoming, ...existing]) {
     const clean = String(item || '')
       .replace(/^[-*•\s]+/, '')
@@ -132,7 +155,6 @@ function parseAssistantReply(rawText) {
   }
   const cleanText = rawText.replace(/\[\[INSPECT:[a-z-]+\]\]/gi, '').trim();
 
-  // Gentle keyword inference if model didn't emit explicit tag
   if (!inspectTab) {
     const lower = cleanText.toLowerCase();
     if (lower.includes('bank alpha') || lower.includes('flagged cell') || lower.includes('bank beta')) {
@@ -162,15 +184,76 @@ function formatThreadTime(iso) {
   }
 }
 
+/** Lightweight inline formatter rendering **bold** and crisp bullets cleanly without raw tables */
+function renderInlineBold(text) {
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  return parts.map((part, idx) => {
+    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+      return (
+        <strong key={idx} className="font-semibold text-white">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
+      return (
+        <code
+          key={idx}
+          className="rounded bg-white/10 px-1 py-0.5 font-mono text-[11px] text-cyan-300"
+        >
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    return <React.Fragment key={idx}>{part}</React.Fragment>;
+  });
+}
+
+function FormattedResponse({ content }) {
+  const lines = content.split('\n');
+  return (
+    <div className="space-y-1.5">
+      {lines.map((line, i) => {
+        const trimmed = line.trim();
+        if (!trimmed) return <div key={i} className="h-1" />;
+        const bulletMatch = trimmed.match(/^[-*•]\s+(.*)$/);
+        if (bulletMatch) {
+          return (
+            <div key={i} className="flex items-start gap-2 pl-0.5">
+              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-400/80" />
+              <span className="flex-1">{renderInlineBold(bulletMatch[1])}</span>
+            </div>
+          );
+        }
+        return <p key={i}>{renderInlineBold(line)}</p>;
+      })}
+    </div>
+  );
+}
+
 export default function NeuroTwinDrawer({
+  isOpen: controlledOpen,
+  onOpenChange,
   activeTab,
   telemetry,
   onInspectTab,
   onShowToast,
 }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [showLogs, setShowLogs] = useState(false);
-  const [showMemory, setShowMemory] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const setIsOpen = useCallback(
+    (next) => {
+      const value = typeof next === 'function' ? next(isOpen) : next;
+      if (onOpenChange) onOpenChange(value);
+      else setInternalOpen(value);
+    },
+    [isOpen, onOpenChange]
+  );
+
+  const [showSidebar, setShowSidebar] = useState(false);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [showModelMenu, setShowModelMenu] = useState(false);
+
   const [threads, setThreads] = useState(() => {
     const saved = loadThreads();
     return saved.length > 0 ? saved : [createEmptyThread()];
@@ -180,23 +263,29 @@ export default function NeuroTwinDrawer({
     return saved.length > 0 ? saved[0].id : null;
   });
   const [memories, setMemories] = useState(() => loadMemories());
-  const [extractingMemory, setExtractingMemory] = useState(false);
+  const [selectedModel, setSelectedModel] = useState(() => loadSavedModel());
+  const [autoSwitchedVision, setAutoSwitchedVision] = useState(false);
+
   const [input, setInput] = useState('');
+  const [attachedImage, setAttachedImage] = useState(null); // { name, dataUrl }
+  const [attachedFile, setAttachedFile] = useState(null); // { name, text, sizeLabel }
   const [isSending, setIsSending] = useState(false);
-  const [failedPrompt, setFailedPrompt] = useState(null);
+  const [extractingMemory, setExtractingMemory] = useState(false);
+  const [failedRequest, setFailedRequest] = useState(null);
   const [errorBanner, setErrorBanner] = useState('');
 
-  // Cursor spotlight state on trigger pill
   const [spot, setSpot] = useState({ x: 90, y: 20, hovering: false });
 
   const inputRef = useRef(null);
   const scrollRef = useRef(null);
+  const imageInputRef = useRef(null);
+  const fileInputRef = useRef(null);
   const lastExtractedCountRef = useRef({});
 
-  // Ensure activeThreadId points to a valid thread
-  const activeThread = useMemo(() => {
-    return threads.find((t) => t.id === activeThreadId) || threads[0];
-  }, [threads, activeThreadId]);
+  const activeThread = useMemo(
+    () => threads.find((t) => t.id === activeThreadId) || threads[0],
+    [threads, activeThreadId]
+  );
 
   useEffect(() => {
     if (!activeThreadId && threads[0]) {
@@ -204,7 +293,6 @@ export default function NeuroTwinDrawer({
     }
   }, [activeThreadId, threads]);
 
-  // Persist threads to localStorage
   useEffect(() => {
     try {
       const nonEmptyOrCurrent = threads.filter(
@@ -212,35 +300,39 @@ export default function NeuroTwinDrawer({
       );
       localStorage.setItem(STORAGE_KEY, JSON.stringify(nonEmptyOrCurrent));
     } catch {
-      // Ignore storage quota errors
+      // Ignore quota errors
     }
   }, [threads, activeThread?.id]);
 
-  // Auto-scroll chat stream
+  useEffect(() => {
+    try {
+      localStorage.setItem(MEMORIES_STORAGE_KEY, JSON.stringify(memories));
+    } catch {
+      // Ignore quota errors
+    }
+  }, [memories]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(MODEL_STORAGE_KEY, selectedModel);
+    } catch {
+      // Ignore
+    }
+  }, [selectedModel]);
+
   useEffect(() => {
     if (scrollRef.current && isOpen) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [activeThread?.messages?.length, isSending, isOpen]);
 
-  // Persist memories to localStorage
   useEffect(() => {
-    try {
-      localStorage.setItem(MEMORIES_STORAGE_KEY, JSON.stringify(memories));
-    } catch {
-      // Ignore storage quota errors
-    }
-  }, [memories]);
-
-  // Focus input when opening
-  useEffect(() => {
-    if (isOpen && !showLogs && !showMemory) {
+    if (isOpen && !showSidebar) {
       const timer = setTimeout(() => inputRef.current?.focus(), 220);
       return () => clearTimeout(timer);
     }
-  }, [isOpen, showLogs, showMemory]);
+  }, [isOpen, showSidebar]);
 
-  // Keyboard shortcuts: Cmd+K / Ctrl+K toggle, Esc minimize
   useEffect(() => {
     const onKeyDown = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -248,12 +340,18 @@ export default function NeuroTwinDrawer({
         setIsOpen((prev) => !prev);
       } else if (e.key === 'Escape' && isOpen) {
         e.preventDefault();
-        setIsOpen(false);
+        if (showAttachMenu || showModelMenu || showSidebar) {
+          setShowAttachMenu(false);
+          setShowModelMenu(false);
+          setShowSidebar(false);
+        } else {
+          setIsOpen(false);
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isOpen]);
+  }, [isOpen, setIsOpen, showAttachMenu, showModelMenu, showSidebar]);
 
   const userMessageCount = useMemo(
     () => (activeThread?.messages || []).filter((m) => m.role === 'user').length,
@@ -261,64 +359,72 @@ export default function NeuroTwinDrawer({
   );
   const limitReached = userMessageCount >= MAX_USER_MESSAGES;
 
-  const extractMemoriesFromThread = useCallback(
-    async (thread) => {
-      if (!thread || !Array.isArray(thread.messages) || thread.messages.length < 2) return;
-      const alreadyCount = lastExtractedCountRef.current[thread.id] || 0;
-      if (thread.messages.length <= alreadyCount) return;
+  const extractMemoriesFromMessages = useCallback(async (threadId, msgs) => {
+    if (!threadId || !Array.isArray(msgs) || msgs.length < 2) return;
+    const alreadyCount = lastExtractedCountRef.current[threadId] || 0;
+    if (msgs.length <= alreadyCount) return;
 
-      lastExtractedCountRef.current[thread.id] = thread.messages.length;
-      const apiBase = import.meta.env.VITE_API_URL || '';
-      setExtractingMemory(true);
-      try {
-        const res = await fetch(`${apiBase}/api/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            mode: 'extract_memory',
-            messages: thread.messages.map((m) => ({ role: m.role, content: m.content })),
-            memories,
-          }),
+    lastExtractedCountRef.current[threadId] = msgs.length;
+    const apiBase = import.meta.env.VITE_API_URL || '';
+    const latestStored = loadMemories();
+    setExtractingMemory(true);
+    try {
+      const res = await fetch(`${apiBase}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'extract_memory',
+          messages: msgs.map((m) => ({ role: m.role, content: m.content })),
+          memories: latestStored,
+        }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data?.memories) && data.memories.length > 0) {
+        setMemories((prev) => {
+          const base = prev.length > 0 ? prev : latestStored;
+          const next = mergeAndCapMemories(base, data.memories);
+          try {
+            localStorage.setItem(MEMORIES_STORAGE_KEY, JSON.stringify(next));
+          } catch {
+            // ignore
+          }
+          return next;
         });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (Array.isArray(data?.memories) && data.memories.length > 0) {
-          setMemories((prev) => mergeAndCapMemories(prev, data.memories));
-        }
-      } catch {
-        // Non-blocking background extraction
-      } finally {
-        setExtractingMemory(false);
       }
-    },
-    [memories]
-  );
+    } catch {
+      // Non-blocking background extraction
+    } finally {
+      setExtractingMemory(false);
+    }
+  }, []);
 
   const handleNewChat = useCallback(() => {
     if (activeThread && activeThread.messages.length >= 2) {
-      extractMemoriesFromThread(activeThread);
+      extractMemoriesFromMessages(activeThread.id, activeThread.messages);
     }
     const fresh = createEmptyThread();
     setThreads((prev) => [fresh, ...prev.filter((t) => t.messages.length > 0)]);
     setActiveThreadId(fresh.id);
-    setShowLogs(false);
-    setShowMemory(false);
+    setShowSidebar(false);
+    setShowAttachMenu(false);
+    setShowModelMenu(false);
     setErrorBanner('');
-    setFailedPrompt(null);
+    setFailedRequest(null);
     setTimeout(() => inputRef.current?.focus(), 100);
-  }, [activeThread, extractMemoriesFromThread]);
+  }, [activeThread, extractMemoriesFromMessages]);
 
   const handleSwitchThread = useCallback(
     (targetThreadId) => {
       if (activeThread && activeThread.id !== targetThreadId && activeThread.messages.length >= 2) {
-        extractMemoriesFromThread(activeThread);
+        extractMemoriesFromMessages(activeThread.id, activeThread.messages);
       }
       setActiveThreadId(targetThreadId);
-      setShowLogs(false);
-      setShowMemory(false);
+      setShowSidebar(false);
       setErrorBanner('');
+      setFailedRequest(null);
     },
-    [activeThread, extractMemoriesFromThread]
+    [activeThread, extractMemoriesFromMessages]
   );
 
   const handleDeleteThread = useCallback(
@@ -340,32 +446,85 @@ export default function NeuroTwinDrawer({
     [activeThread?.id]
   );
 
+  const handleImageUpload = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 4 * 1024 * 1024) {
+      if (onShowToast) onShowToast('Image must be under 4 MB', 'warning');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setAttachedImage({ name: file.name, dataUrl: String(reader.result || '') });
+      setSelectedModel('qwen/qwen-3.8-27b');
+      setAutoSwitchedVision(true);
+      setShowAttachMenu(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const rawText = String(reader.result || '');
+      const clipped = rawText.slice(0, MAX_FILE_CHARS);
+      setAttachedFile({
+        name: file.name,
+        text: clipped,
+        truncated: rawText.length > MAX_FILE_CHARS,
+      });
+      setShowAttachMenu(false);
+    };
+    reader.readAsText(file);
+  };
+
   const sendMessage = useCallback(
-    async (promptText, isRetry = false) => {
-      const text = (promptText || '').trim();
-      if (!text || isSending || !activeThread) return;
+    async (promptText, retryPayload = null) => {
+      if (isSending || !activeThread) return;
+
+      const text = (retryPayload ? retryPayload.text : promptText || '').trim();
+      const imgObj = retryPayload ? retryPayload.image : attachedImage;
+      const fileObj = retryPayload ? retryPayload.file : attachedFile;
+      const modelToUse = retryPayload
+        ? retryPayload.model
+        : imgObj
+        ? 'qwen/qwen-3.8-27b'
+        : selectedModel;
+
+      const effectivePrompt =
+        text || (imgObj ? 'Analyze this screenshot in detail.' : fileObj ? `Analyze ${fileObj.name}.` : '');
+      if (!effectivePrompt) return;
 
       const currentUserCount = activeThread.messages.filter((m) => m.role === 'user').length;
-      if (!isRetry && currentUserCount >= MAX_USER_MESSAGES) return;
+      if (!retryPayload && currentUserCount >= MAX_USER_MESSAGES) return;
 
       setErrorBanner('');
-      setFailedPrompt(null);
+      setFailedRequest(null);
+      setShowAttachMenu(false);
+      setShowModelMenu(false);
 
       let nextMessages = activeThread.messages;
-      if (!isRetry) {
+      if (!retryPayload) {
         const userMsg = {
           id: `msg-${Date.now()}`,
           role: 'user',
-          content: text,
+          content: effectivePrompt,
+          imagePreview: imgObj?.dataUrl || null,
+          imageName: imgObj?.name || null,
+          fileName: fileObj?.name || null,
           ts: new Date().toISOString(),
         };
         nextMessages = [...activeThread.messages, userMsg];
 
         const shortTitle =
           activeThread.messages.length === 0
-            ? text.length > 38
-              ? `${text.slice(0, 38)}…`
-              : text
+            ? effectivePrompt.length > 36
+              ? `${effectivePrompt.slice(0, 36)}…`
+              : effectivePrompt
             : activeThread.title;
 
         setThreads((prev) =>
@@ -381,10 +540,15 @@ export default function NeuroTwinDrawer({
           )
         );
         setInput('');
+        setAttachedImage(null);
+        setAttachedFile(null);
+        setAutoSwitchedVision(false);
       }
 
       setIsSending(true);
       const apiBase = import.meta.env.VITE_API_URL || '';
+      const storedMemories = loadMemories();
+      const activeMemories = storedMemories.length > 0 ? storedMemories : memories;
 
       try {
         const res = await fetch(`${apiBase}/api/chat`, {
@@ -392,9 +556,13 @@ export default function NeuroTwinDrawer({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             mode: 'chat',
+            model: modelToUse,
             messages: nextMessages.map((m) => ({ role: m.role, content: m.content })),
             telemetry,
-            memories,
+            memories: activeMemories,
+            image_base64: imgObj?.dataUrl || null,
+            file_text: fileObj?.text || null,
+            file_name: fileObj?.name || null,
           }),
         });
 
@@ -416,8 +584,11 @@ export default function NeuroTwinDrawer({
           role: 'assistant',
           content: cleanText,
           inspectTab,
+          modelUsed: data.model || modelToUse,
           ts: new Date().toISOString(),
         };
+
+        const finalMessages = [...nextMessages, assistantMsg];
 
         setThreads((prev) =>
           prev.map((t) =>
@@ -425,19 +596,39 @@ export default function NeuroTwinDrawer({
               ? {
                   ...t,
                   updatedAt: new Date().toISOString(),
-                  messages: [...nextMessages, assistantMsg],
+                  messages: finalMessages,
                 }
               : t
           )
         );
+
+        // Automatically extract memories after every 2nd user message
+        const updatedUserCount = finalMessages.filter((m) => m.role === 'user').length;
+        if (updatedUserCount >= 2 && updatedUserCount % 2 === 0) {
+          extractMemoriesFromMessages(activeThread.id, finalMessages);
+        }
       } catch (err) {
         setErrorBanner(err.message || 'Unable to reach Neuro Twin backend.');
-        setFailedPrompt(text);
+        setFailedRequest({
+          text: effectivePrompt,
+          image: imgObj,
+          file: fileObj,
+          model: modelToUse,
+        });
       } finally {
         setIsSending(false);
       }
     },
-    [activeThread, isSending, memories, telemetry]
+    [
+      activeThread,
+      attachedFile,
+      attachedImage,
+      extractMemoriesFromMessages,
+      isSending,
+      memories,
+      selectedModel,
+      telemetry,
+    ]
   );
 
   const handleInspectClick = (tabId) => {
@@ -448,9 +639,26 @@ export default function NeuroTwinDrawer({
 
   const starters = STARTERS_BY_TAB[activeTab] || STARTERS_BY_TAB.dashboard;
   const greeting = getTimeGreeting();
+  const activeModelObj = GROQ_MODELS.find((m) => m.id === selectedModel) || GROQ_MODELS[0];
 
   return (
     <>
+      {/* Hidden file pickers */}
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+        onChange={handleImageUpload}
+        className="hidden"
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".csv,.json,.txt,text/csv,application/json,text/plain"
+        onChange={handleFileUpload}
+        className="hidden"
+      />
+
       {/* ════════════════════════════════════════════════════════
           BOTTOM-RIGHT OBSIDIAN GLASS TRIGGER PILL ("Ask Neuro Twin")
       ════════════════════════════════════════════════════════ */}
@@ -477,7 +685,6 @@ export default function NeuroTwinDrawer({
             transition={{ type: 'spring', stiffness: 420, damping: 28 }}
             className="fixed bottom-20 right-4 z-50 flex items-center gap-2.5 overflow-hidden rounded-full border border-slate-700/70 bg-[#0B0F19]/[0.88] px-3.5 py-2 backdrop-blur-2xl transition-colors duration-200 hover:border-cyan-400/50 shadow-[0_12px_32px_-4px_rgba(9,13,22,0.35),0_4px_12px_-2px_rgba(2,132,199,0.18),inset_0_1px_0_0_rgba(255,255,255,0.18)] lg:bottom-6 lg:right-6"
           >
-            {/* Cursor-tracking cyan-emerald spotlight beneath glass surface */}
             <span
               className="pointer-events-none absolute inset-0 transition-opacity duration-200"
               style={{
@@ -486,7 +693,6 @@ export default function NeuroTwinDrawer({
               }}
             />
 
-            {/* 24px Animated Neural Core Badge */}
             <span className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-cyan-400/30 bg-slate-900/90">
               <span className="absolute h-5 w-5 animate-ping rounded-full bg-cyan-400/40 opacity-35" />
               <span
@@ -509,7 +715,7 @@ export default function NeuroTwinDrawer({
       </AnimatePresence>
 
       {/* ════════════════════════════════════════════════════════
-          MACOS GENIE DARK OBSIDIAN GLASS DRAWER
+          GEMINI-MINIMALIST MACOS GENIE OBSIDIAN DRAWER
       ════════════════════════════════════════════════════════ */}
       <AnimatePresence>
         {isOpen && (
@@ -557,252 +763,246 @@ export default function NeuroTwinDrawer({
                 ease: [0.4, 0, 1, 1],
               },
             }}
-            className="fixed bottom-20 right-4 z-50 flex h-[min(600px,calc(100vh-6rem))] w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-800 bg-[#090D16]/[0.95] text-slate-100 shadow-2xl backdrop-blur-2xl sm:w-[476px] lg:bottom-6 lg:right-6 lg:h-[min(600px,calc(100vh-3rem))]"
+            className="fixed bottom-20 right-4 z-50 flex h-[min(620px,calc(100vh-6rem))] w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-800 bg-[#090D16]/[0.95] text-slate-100 shadow-2xl backdrop-blur-2xl sm:w-[460px] lg:bottom-6 lg:right-6 lg:h-[min(620px,calc(100vh-3rem))]"
           >
-            {/* Header Bar */}
-            <div className="flex items-center justify-between gap-2 border-b border-slate-800/90 px-3.5 py-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-cyan-400/35 bg-slate-900">
+            {/* Minimalist Gemini-Style Top Header */}
+            <div className="flex items-center justify-between border-b border-slate-800/70 px-3.5 py-2.5">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSidebar((s) => !s)}
+                  title="Menu, Logs & Memory"
+                  className={`rounded-lg p-1.5 transition ${
+                    showSidebar
+                      ? 'bg-white/10 text-white'
+                      : 'text-slate-400 hover:bg-white/5 hover:text-slate-100'
+                  }`}
+                >
+                  <Menu className="h-4 w-4" />
+                </button>
+
+                <span className="relative flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-cyan-400/35 bg-slate-900">
                   <span
-                    className="h-2.5 w-2.5 rounded-full shadow-[0_0_8px_rgba(0,240,255,0.85)]"
+                    className="h-2 w-2 rounded-full shadow-[0_0_8px_rgba(0,240,255,0.85)]"
                     style={{
                       background: 'radial-gradient(circle at 30% 30%, #00F0FF, #10B981)',
                     }}
                   />
                 </span>
-                <div className="flex items-center gap-1.5">
-                  <span className="whitespace-nowrap text-sm font-semibold tracking-tight text-slate-100">
-                    Neuro Twin
-                  </span>
-                  <span className="whitespace-nowrap rounded-full border border-slate-700/80 bg-slate-800/80 px-2 py-0.5 font-mono text-[10px] font-semibold text-cyan-300">
-                    {userMessageCount} / {MAX_USER_MESSAGES}
-                  </span>
-                </div>
+                <span className="whitespace-nowrap text-sm font-semibold tracking-tight text-slate-100">
+                  Neuro Twin
+                </span>
               </div>
 
-              <div className="flex shrink-0 items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowMemory((m) => !m);
-                    setShowLogs(false);
-                  }}
-                  title="Cross-Chat Memory"
-                  className={`flex items-center gap-1 whitespace-nowrap rounded-lg px-2 py-1 text-[11px] font-medium transition ${
-                    showMemory
-                      ? 'bg-emerald-500/15 text-emerald-300'
-                      : 'text-slate-400 hover:bg-slate-800/80 hover:text-slate-200'
-                  }`}
-                >
-                  <Brain
-                    className={`h-3.5 w-3.5 ${
-                      extractingMemory ? 'animate-pulse text-cyan-400' : 'text-emerald-400'
-                    }`}
-                  />
-                  <span>Memory ({memories.length})</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowLogs((s) => !s);
-                    setShowMemory(false);
-                  }}
-                  title="Conversation Logs"
-                  className={`flex items-center gap-1 whitespace-nowrap rounded-lg px-2 py-1 text-[11px] font-medium transition ${
-                    showLogs
-                      ? 'bg-cyan-500/15 text-cyan-300'
-                      : 'text-slate-400 hover:bg-slate-800/80 hover:text-slate-200'
-                  }`}
-                >
-                  <History className="h-3.5 w-3.5" />
-                  <span>Logs</span>
-                </button>
+              <div className="flex items-center gap-1">
                 <button
                   type="button"
                   onClick={handleNewChat}
-                  title="New Chat Thread"
-                  className="flex items-center gap-1 whitespace-nowrap rounded-lg px-2 py-1 text-[11px] font-medium text-slate-300 transition hover:bg-slate-800/80 hover:text-white"
+                  title="New Chat"
+                  className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white/5 hover:text-emerald-400"
                 >
-                  <Plus className="h-3.5 w-3.5 text-emerald-400" />
-                  <span>New Chat</span>
+                  <SquarePen className="h-4 w-4" />
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsOpen(false)}
                   title="Minimize (Esc)"
-                  className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-800/80 hover:text-white"
+                  className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white/5 hover:text-white"
                 >
-                  <Minimize2 className="h-3.5 w-3.5" />
+                  <Minimize2 className="h-4 w-4" />
                 </button>
               </div>
             </div>
 
-            {/* Body Area: Memory Popover / Persistent Logs Overlay / Active Thread */}
+            {/* Body Container */}
             <div className="relative flex flex-1 flex-col overflow-hidden">
+              {/* Collapsible Left-Side Gemini Rail (Logs, Memory & Quota) */}
               <AnimatePresence>
-                {showMemory && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    transition={{ duration: 0.18 }}
-                    className="hud-scroll absolute inset-0 z-20 flex flex-col gap-2.5 overflow-y-auto bg-[#090D16]/[0.98] p-4"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5">
-                        <Brain className="h-3.5 w-3.5 text-emerald-400" />
-                        <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                          Cross-Chat Memory ({memories.length} / {MAX_MEMORIES})
+                {showSidebar && (
+                  <>
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      onClick={() => setShowSidebar(false)}
+                      className="absolute inset-0 z-20 bg-black/50 backdrop-blur-[2px]"
+                    />
+                    <motion.aside
+                      initial={{ x: '-100%' }}
+                      animate={{ x: 0 }}
+                      exit={{ x: '-100%' }}
+                      transition={{ type: 'spring', stiffness: 360, damping: 34 }}
+                      className="hud-scroll absolute inset-y-0 left-0 z-30 flex w-[82%] max-w-[320px] flex-col gap-4 overflow-y-auto border-r border-slate-800 bg-[#0B0F19]/[0.98] p-4 shadow-2xl"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                          Workspace & Memory
                         </span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        {memories.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => setMemories([])}
-                            className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[10px] font-semibold text-red-300 transition hover:bg-red-500/20"
-                          >
-                            Clear All
-                          </button>
-                        )}
                         <button
                           type="button"
-                          onClick={() => setShowMemory(false)}
-                          className="rounded-md p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+                          onClick={() => setShowSidebar(false)}
+                          className="rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white"
                         >
                           <X className="h-3.5 w-3.5" />
                         </button>
                       </div>
-                    </div>
 
-                    <p className="text-[11px] leading-relaxed text-slate-400">
-                      Contacts, EV assignments, preferences, and key facts extracted automatically across threads.
-                    </p>
-
-                    {memories.length === 0 ? (
-                      <div className="mt-8 rounded-xl border border-dashed border-slate-800 p-5 text-center text-xs text-slate-500">
-                        No memories stored yet. Mention contacts, EVs, or preferences and switch threads or start a New Chat to capture them automatically.
-                      </div>
-                    ) : (
-                      <div className="flex flex-col gap-2">
-                        {memories.map((item, idx) => (
+                      {/* Quota Card */}
+                      <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="font-medium text-slate-400">Thread Quota</span>
+                          <span className="font-mono font-semibold text-cyan-300">
+                            {userMessageCount} / {MAX_USER_MESSAGES} messages
+                          </span>
+                        </div>
+                        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
                           <div
-                            key={`${idx}-${item}`}
-                            className="group flex items-start justify-between gap-2 rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2.5 text-xs text-slate-200"
-                          >
-                            <span className="leading-snug">{item}</span>
+                            className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-400 transition-all"
+                            style={{ width: `${(userMessageCount / MAX_USER_MESSAGES) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Cross-Chat Memory Section */}
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                            <Brain
+                              className={`h-3.5 w-3.5 ${
+                                extractingMemory ? 'animate-pulse text-cyan-400' : 'text-emerald-400'
+                              }`}
+                            />
+                            <span>Memory ({memories.length})</span>
+                          </div>
+                          {memories.length > 0 && (
                             <button
                               type="button"
-                              onClick={() =>
-                                setMemories((prev) => prev.filter((_, i) => i !== idx))
-                              }
-                              title="Remove memory"
-                              className="shrink-0 rounded-md p-0.5 text-slate-500 transition hover:bg-red-500/15 hover:text-red-400"
+                              onClick={() => setMemories([])}
+                              className="text-[10px] font-semibold text-red-400 transition hover:text-red-300"
                             >
-                              <X className="h-3.5 w-3.5" />
+                              Clear All
                             </button>
+                          )}
+                        </div>
+
+                        {memories.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-slate-800 p-3 text-[11px] text-slate-500">
+                            No saved memories yet. Captured automatically every 2 messages or on New Chat.
                           </div>
-                        ))}
-                      </div>
-                    )}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              <AnimatePresence>
-                {showLogs && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    transition={{ duration: 0.18 }}
-                    className="hud-scroll absolute inset-0 z-20 flex flex-col gap-2 overflow-y-auto bg-[#090D16]/[0.98] p-4"
-                  >
-                    <div className="mb-1 flex items-center justify-between">
-                      <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                        Saved Neural Logs ({threads.filter((t) => t.messages.length > 0).length})
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setShowLogs(false)}
-                        className="rounded-md p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-
-                    {threads.filter((t) => t.messages.length > 0).length === 0 ? (
-                      <div className="mt-10 text-center text-xs text-slate-500">
-                        No past conversations saved yet.
-                      </div>
-                    ) : (
-                      threads
-                        .filter((t) => t.messages.length > 0)
-                        .map((t) => {
-                          const isCurrent = t.id === activeThread?.id;
-                          const uCount = t.messages.filter((m) => m.role === 'user').length;
-                          return (
-                            <div
-                              key={t.id}
-                              onClick={() => handleSwitchThread(t.id)}
-                              className={`group flex cursor-pointer items-center justify-between gap-2 rounded-xl border p-3 transition ${
-                                isCurrent
-                                  ? 'border-cyan-500/40 bg-cyan-500/10'
-                                  : 'border-slate-800 bg-slate-900/60 hover:border-slate-700 hover:bg-slate-900'
-                              }`}
-                            >
-                              <div className="min-w-0">
-                                <div className="truncate text-xs font-semibold text-slate-100">
-                                  {t.title}
-                                </div>
-                                <div className="mt-0.5 flex items-center gap-2 text-[10px] text-slate-500">
-                                  <span>{formatThreadTime(t.updatedAt)}</span>
-                                  <span>•</span>
-                                  <span className="font-mono text-slate-400">
-                                    {uCount}/10 msgs
-                                  </span>
-                                </div>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={(e) => handleDeleteThread(t.id, e)}
-                                title="Delete thread"
-                                className="rounded-lg p-1.5 text-slate-500 opacity-70 transition hover:bg-red-500/15 hover:text-red-400 group-hover:opacity-100"
+                        ) : (
+                          <div className="flex flex-col gap-1.5">
+                            {memories.map((item, idx) => (
+                              <div
+                                key={`${idx}-${item}`}
+                                className="flex items-start justify-between gap-2 rounded-lg border border-slate-800/90 bg-slate-900/60 px-2.5 py-2 text-[11px] text-slate-300"
                               >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          );
-                        })
-                    )}
-                  </motion.div>
+                                <span className="leading-snug">{item}</span>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setMemories((prev) => prev.filter((_, i) => i !== idx))
+                                  }
+                                  title="Delete memory"
+                                  className="shrink-0 rounded p-0.5 text-slate-500 hover:bg-red-500/15 hover:text-red-400"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Conversation Logs Section */}
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                            <History className="h-3.5 w-3.5 text-cyan-400" />
+                            <span>
+                              Logs ({threads.filter((t) => t.messages.length > 0).length})
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleNewChat}
+                            className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-400 hover:text-emerald-300"
+                          >
+                            <Plus className="h-3 w-3" /> New Chat
+                          </button>
+                        </div>
+
+                        {threads.filter((t) => t.messages.length > 0).length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-slate-800 p-3 text-[11px] text-slate-500">
+                            No past conversations saved yet.
+                          </div>
+                        ) : (
+                          <div className="flex flex-col gap-1.5">
+                            {threads
+                              .filter((t) => t.messages.length > 0)
+                              .map((t) => {
+                                const isCurrent = t.id === activeThread?.id;
+                                const uCount = t.messages.filter((m) => m.role === 'user').length;
+                                return (
+                                  <div
+                                    key={t.id}
+                                    onClick={() => handleSwitchThread(t.id)}
+                                    className={`group flex cursor-pointer items-center justify-between gap-2 rounded-xl border px-2.5 py-2 transition ${
+                                      isCurrent
+                                        ? 'border-cyan-500/40 bg-cyan-500/10'
+                                        : 'border-slate-800/80 bg-slate-900/50 hover:border-slate-700 hover:bg-slate-900'
+                                    }`}
+                                  >
+                                    <div className="min-w-0">
+                                      <div className="truncate text-[11px] font-semibold text-slate-200">
+                                        {t.title}
+                                      </div>
+                                      <div className="mt-0.5 text-[10px] text-slate-500">
+                                        {formatThreadTime(t.updatedAt)} · {uCount}/10
+                                      </div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleDeleteThread(t.id, e)}
+                                      title="Delete thread"
+                                      className="rounded p-1 text-slate-500 hover:bg-red-500/15 hover:text-red-400"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        )}
+                      </div>
+                    </motion.aside>
+                  </>
                 )}
               </AnimatePresence>
 
-              {/* Message Stream OR Empty State */}
+              {/* Message Stream OR Gemini-Style Empty State */}
               <div
                 ref={scrollRef}
-                className="hud-scroll flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-4"
+                className="hud-scroll flex flex-1 flex-col gap-3.5 overflow-y-auto px-4 py-4"
               >
                 {activeThread?.messages.length === 0 ? (
-                  <div className="my-auto flex flex-col items-center px-2 text-center">
-                    <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl border border-cyan-400/25 bg-slate-900/90 shadow-[0_0_24px_rgba(0,240,255,0.12)]">
-                      <Sparkles className="h-4 w-4 text-cyan-400" />
+                  <div className="my-auto flex flex-col items-center px-3 py-6 text-center">
+                    <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-2xl border border-cyan-400/20 bg-slate-900/80 shadow-[0_0_28px_rgba(0,240,255,0.12)]">
+                      <Sparkles className="h-5 w-5 text-cyan-400" />
                     </div>
-                    <h3 className="text-xl font-semibold tracking-tight text-slate-100 sm:text-2xl">
+                    <h3 className="text-2xl font-semibold tracking-tight text-slate-100">
                       {greeting}
                     </h3>
-                    <p className="mt-1.5 text-xs text-slate-400">
-                      Synced with live 3D telemetry · Ask anything about the grid or beyond
+                    <p className="mt-2 max-w-xs text-xs text-slate-400">
+                      Live 3D telemetry &amp; cross-chat memory active
                     </p>
 
-                    <div className="mt-5 flex w-full flex-col gap-2">
+                    <div className="mt-7 flex w-full flex-col gap-2">
                       {starters.map((prompt) => (
                         <button
                           key={prompt}
                           type="button"
                           onClick={() => sendMessage(prompt)}
-                          className="rounded-xl border border-slate-800 bg-white/[0.04] px-3.5 py-2.5 text-left text-xs font-medium text-slate-200 transition hover:border-cyan-400/40 hover:bg-white/[0.08] hover:text-white"
+                          className="rounded-2xl border border-slate-800/90 bg-white/[0.03] px-3.5 py-2.5 text-left text-xs font-medium text-slate-300 transition hover:border-cyan-400/40 hover:bg-white/[0.07] hover:text-white"
                         >
                           {prompt}
                         </button>
@@ -824,11 +1024,29 @@ export default function NeuroTwinDrawer({
                         <div
                           className={`max-w-[88%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed ${
                             isUser
-                              ? 'bg-gradient-to-br from-sky-600/90 to-emerald-600/90 text-white shadow-sm'
-                              : 'border border-slate-800 bg-slate-900/85 text-slate-200'
+                              ? 'bg-[#1B2336] text-slate-100 border border-slate-700/70 shadow-sm'
+                              : 'text-slate-200'
                           }`}
                         >
-                          <div className="whitespace-pre-wrap">{msg.content}</div>
+                          {isUser && msg.imagePreview && (
+                            <img
+                              src={msg.imagePreview}
+                              alt={msg.imageName || 'Uploaded screenshot'}
+                              className="mb-2 max-h-40 w-auto rounded-xl border border-slate-700/60 object-contain"
+                            />
+                          )}
+                          {isUser && msg.fileName && (
+                            <div className="mb-1.5 inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] font-medium text-cyan-300">
+                              <FileText className="h-3 w-3" />
+                              <span>{msg.fileName}</span>
+                            </div>
+                          )}
+
+                          {isUser ? (
+                            <div className="whitespace-pre-wrap">{msg.content}</div>
+                          ) : (
+                            <FormattedResponse content={msg.content} />
+                          )}
 
                           {!isUser && targetTabObj && (
                             <button
@@ -847,10 +1065,10 @@ export default function NeuroTwinDrawer({
                 )}
 
                 {isSending && (
-                  <div className="flex items-start">
-                    <div className="flex items-center gap-2 rounded-2xl border border-slate-800 bg-slate-900/85 px-3.5 py-2.5 text-xs text-slate-400">
+                  <div className="flex items-start px-1">
+                    <div className="flex items-center gap-2 rounded-2xl border border-slate-800/90 bg-slate-900/70 px-3.5 py-2 text-xs text-slate-400">
                       <span className="h-2 w-2 animate-ping rounded-full bg-cyan-400" />
-                      <span>Thinking with live grid context…</span>
+                      <span>Thinking with {activeModelObj.label}…</span>
                     </div>
                   </div>
                 )}
@@ -861,10 +1079,10 @@ export default function NeuroTwinDrawer({
                       <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
                       <div className="flex-1">
                         <div>{errorBanner}</div>
-                        {failedPrompt && (
+                        {failedRequest && (
                           <button
                             type="button"
-                            onClick={() => sendMessage(failedPrompt, true)}
+                            onClick={() => sendMessage(failedRequest.text, failedRequest)}
                             className="mt-2 inline-flex items-center gap-1 rounded-lg border border-red-400/30 bg-red-500/20 px-2.5 py-1 text-[11px] font-semibold text-red-100 transition hover:bg-red-500/30"
                           >
                             <RotateCcw className="h-3 w-3" />
@@ -879,7 +1097,7 @@ export default function NeuroTwinDrawer({
 
               {/* 10-Message Guardrail Banner */}
               {limitReached && (
-                <div className="mx-4 mb-2 flex items-center justify-between gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+                <div className="mx-3.5 mb-2 flex items-center justify-between gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
                   <span>
                     Session limit reached (10/10) to optimize neural tokens — Start a New Thread to
                     continue.
@@ -894,37 +1112,195 @@ export default function NeuroTwinDrawer({
                 </div>
               )}
 
-              {/* Input Footer */}
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  sendMessage(input);
-                }}
-                className="border-t border-slate-800/90 p-3"
-              >
-                <div className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/90 px-3 py-1.5 focus-within:border-cyan-500/50">
-                  <input
+              {/* Unified Gemini-Style Input Pill */}
+              <div className="relative px-3.5 pb-3.5 pt-1">
+                {/* Attach Popover Menu */}
+                <AnimatePresence>
+                  {showAttachMenu && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                      transition={{ duration: 0.14 }}
+                      className="absolute bottom-[4.5rem] left-3.5 z-30 w-56 rounded-2xl border border-slate-700/80 bg-[#131824] p-1.5 shadow-2xl backdrop-blur-xl"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => imageInputRef.current?.click()}
+                        className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-medium text-slate-200 transition hover:bg-white/10"
+                      >
+                        <ImageIcon className="h-4 w-4 text-cyan-400" />
+                        <span>Upload Screenshot / Image</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-medium text-slate-200 transition hover:bg-white/10"
+                      >
+                        <FileText className="h-4 w-4 text-emerald-400" />
+                        <span>Attach Data File (.csv/.json/.txt)</span>
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Model Selector Dropdown Menu */}
+                <AnimatePresence>
+                  {showModelMenu && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                      transition={{ duration: 0.14 }}
+                      className="absolute bottom-[4.5rem] right-12 z-30 w-56 rounded-2xl border border-slate-700/80 bg-[#131824] p-1.5 shadow-2xl backdrop-blur-xl"
+                    >
+                      {GROQ_MODELS.map((m) => {
+                        const active = selectedModel === m.id;
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedModel(m.id);
+                              setAutoSwitchedVision(false);
+                              setShowModelMenu(false);
+                            }}
+                            className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left transition ${
+                              active
+                                ? 'bg-cyan-500/15 text-cyan-200'
+                                : 'text-slate-200 hover:bg-white/10'
+                            }`}
+                          >
+                            <div>
+                              <div className="text-xs font-semibold">{m.label}</div>
+                              <div className="text-[10px] text-slate-400">{m.desc}</div>
+                            </div>
+                            {active && <Check className="h-3.5 w-3.5 text-cyan-400" />}
+                          </button>
+                        );
+                      })}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    sendMessage(input);
+                  }}
+                  className="rounded-3xl border border-slate-700/70 bg-[#131824] px-3 py-2 shadow-lg focus-within:border-cyan-500/50"
+                >
+                  {/* Attachment Preview Chips */}
+                  {(attachedImage || attachedFile || autoSwitchedVision) && (
+                    <div className="mb-2 flex flex-wrap items-center gap-2 px-1">
+                      {attachedImage && (
+                        <div className="relative flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/90 p-1 pr-2">
+                          <img
+                            src={attachedImage.dataUrl}
+                            alt={attachedImage.name}
+                            className="h-8 w-8 rounded-lg object-cover"
+                          />
+                          <span className="max-w-[110px] truncate text-[10px] font-medium text-slate-200">
+                            {attachedImage.name}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAttachedImage(null);
+                              setAutoSwitchedVision(false);
+                            }}
+                            className="rounded-full p-0.5 text-slate-400 hover:bg-white/10 hover:text-white"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      )}
+
+                      {attachedFile && (
+                        <div className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900/90 px-2.5 py-1 text-[10px] font-medium text-emerald-300">
+                          <FileText className="h-3 w-3" />
+                          <span className="max-w-[130px] truncate">{attachedFile.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => setAttachedFile(null)}
+                            className="rounded-full p-0.5 text-slate-400 hover:bg-white/10 hover:text-white"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      )}
+
+                      {autoSwitchedVision && (
+                        <span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-medium text-cyan-300">
+                          Auto-switched to Vision
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Borderless Center Textarea */}
+                  <textarea
                     ref={inputRef}
-                    type="text"
+                    rows={1}
                     value={input}
                     disabled={limitReached || isSending}
                     onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage(input);
+                      }
+                    }}
                     placeholder={
-                      limitReached
-                        ? 'Thread limit reached (10/10)…'
-                        : 'Ask Neuro Twin anything…'
+                      limitReached ? 'Thread limit reached (10/10)…' : 'Ask Neuro Twin...'
                     }
-                    className="flex-1 bg-transparent py-1 text-xs text-slate-100 placeholder-slate-500 outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                    className="hud-scroll max-h-24 w-full resize-none bg-transparent px-1.5 py-1 text-xs text-slate-100 placeholder-slate-500 outline-none disabled:cursor-not-allowed disabled:opacity-50"
                   />
-                  <button
-                    type="submit"
-                    disabled={limitReached || isSending || !input.trim()}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-emerald-500 text-slate-950 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-35"
-                  >
-                    <Send className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </form>
+
+                  {/* Bottom Pill Controls Row: + Attach | Model v + Send */}
+                  <div className="mt-1 flex items-center justify-between">
+                    <button
+                      type="button"
+                      disabled={limitReached || isSending}
+                      onClick={() => {
+                        setShowAttachMenu((a) => !a);
+                        setShowModelMenu(false);
+                      }}
+                      title="Upload screenshot or data file"
+                      className="flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/10 hover:text-white disabled:opacity-40"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={limitReached || isSending}
+                        onClick={() => {
+                          setShowModelMenu((m) => !m);
+                          setShowAttachMenu(false);
+                        }}
+                        className="inline-flex items-center gap-1 rounded-full border border-slate-700/70 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-slate-300 transition hover:border-slate-600 hover:bg-white/10 hover:text-white disabled:opacity-40"
+                      >
+                        <span>{activeModelObj.label}</span>
+                        <ChevronDown className="h-3 w-3 text-slate-400" />
+                      </button>
+
+                      <button
+                        type="submit"
+                        disabled={
+                          limitReached ||
+                          isSending ||
+                          (!input.trim() && !attachedImage && !attachedFile)
+                        }
+                        className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-cyan-400 to-emerald-400 text-slate-950 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-35"
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              </div>
             </div>
           </motion.section>
         )}

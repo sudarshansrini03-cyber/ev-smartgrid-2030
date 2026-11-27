@@ -23,6 +23,7 @@ import {
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [hudCollapsed, setHudCollapsed] = useState(false);
+  const [neuroOpen, setNeuroOpen] = useState(false);
   const [canvasReady, setCanvasReady] = useState(false);
   const [customFocus, setCustomFocus] = useState(null);
   const [toasts, setToasts] = useState([]);
@@ -644,7 +645,7 @@ export default function App() {
             stats={stats}
             onSimulateCity={handleSimulateCity}
             onApplyRecommendation={(msg) => addToast(msg)}
-            onAskAiAdvisor={handleAskAiAdvisor}
+            onOpenNeuroTwin={() => setNeuroOpen(true)}
             aiAdvice={aiAdvice}
             aiLoading={aiLoading}
           />
@@ -740,6 +741,8 @@ export default function App() {
 
       {/* Neuro Twin Obsidian Glass AI Drawer & Trigger Pill */}
       <NeuroTwinDrawer
+        isOpen={neuroOpen}
+        onOpenChange={setNeuroOpen}
         activeTab={activeTab}
         telemetry={neuroTelemetry}
         onInspectTab={handleSelectTab}

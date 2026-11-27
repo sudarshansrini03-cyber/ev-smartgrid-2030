@@ -7,7 +7,7 @@ export default function DashboardHUD({
   stats,
   onSimulateCity,
   onApplyRecommendation,
-  onAskAiAdvisor,
+  onOpenNeuroTwin,
   aiAdvice,
   aiLoading,
 }) {
@@ -117,24 +117,24 @@ export default function DashboardHUD({
         transition={{ duration: 0.28 }}
         className="hud-scroll pointer-events-auto hidden max-h-[calc(100vh-6.5rem)] w-80 flex-col gap-3 overflow-y-auto rounded-2xl border border-slate-200/80 bg-white/75 p-4 shadow-lg backdrop-blur-xl lg:flex"
       >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wider text-slate-700">
-            <Sparkles className="h-3.5 w-3.5 text-emerald-500" />
-            AI Recommendations
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider text-slate-700">
+            <Sparkles className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+            <span>NEURO TWIN RECOMMENDATIONS</span>
           </div>
           <button
-            onClick={onAskAiAdvisor}
+            onClick={onOpenNeuroTwin}
             disabled={aiLoading}
-            className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1 text-[10px] font-bold text-sky-700 transition hover:bg-sky-100 disabled:opacity-60"
+            className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1 text-[10px] font-bold text-sky-700 transition hover:bg-sky-100 disabled:opacity-60"
           >
             <Bot className="h-3 w-3" />
-            {aiLoading ? 'Analyzing…' : 'AI Advise'}
+            {aiLoading ? 'Analyzing…' : 'Ask Neuro Twin'}
           </button>
         </div>
 
         {aiAdvice && (
           <div className="rounded-xl border border-sky-200 bg-sky-50/85 p-3 text-[11px] leading-relaxed text-slate-800">
-            <div className="mb-1 font-bold text-sky-700">Live BMS AI Advisory</div>
+            <div className="mb-1 font-bold text-sky-700">Live BMS Neuro Twin Advisory</div>
             {aiAdvice}
           </div>
         )}
