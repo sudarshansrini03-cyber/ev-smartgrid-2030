@@ -43,8 +43,10 @@ export default function App() {
 
   // 2. Vehicles Fleet State
   const [vehicles, setVehicles] = useState(INITIAL_EVS);
+  const vehiclesRef = useRef(INITIAL_EVS);
+  vehiclesRef.current = vehicles;
   const [selectedVehicleId, setSelectedVehicleId] = useState(INITIAL_EVS[0].id);
-  const evCounterRef = useRef(1006);
+  const evCounterRef = useRef(1007);
 
   // 3. Stations State
   const [gpsStatus, setGpsStatus] = useState('idle');
@@ -126,6 +128,19 @@ export default function App() {
     setSelectedStationId(null);
     addToast('Camera view reset to studio framing');
   }, [addToast]);
+
+  // Sync Connected EVs KPI dynamically with fleet additions and deletions
+  const prevFleetSizeRef = useRef(INITIAL_EVS.length);
+  useEffect(() => {
+    const delta = vehicles.length - prevFleetSizeRef.current;
+    if (delta !== 0) {
+      prevFleetSizeRef.current = vehicles.length;
+      setStats((prev) => ({
+        ...prev,
+        evs: Math.max(0, prev.evs + delta),
+      }));
+    }
+  }, [vehicles.length]);
 
   // Subtle live ambient drift on Dashboard
   useEffect(() => {
@@ -223,8 +238,12 @@ export default function App() {
         }
       }
 
-      const exists = vehicles.some((v) => v.id.toLowerCase() === assignedId.toLowerCase());
-      const uniqueId = exists ? `EV-${evCounterRef.current++}` : assignedId;
+      const currentFleet = vehiclesRef.current;
+      let uniqueId = assignedId;
+      while (currentFleet.some((v) => v.id.toLowerCase() === uniqueId.toLowerCase())) {
+        uniqueId = `EV-${evCounterRef.current++}`;
+      }
+
       const newEv = {
         id: uniqueId,
         model: String(input?.model || 'Custom EV').trim(),
@@ -236,6 +255,7 @@ export default function App() {
         owner: String(input?.owner || 'Sudarshan').trim(),
       };
 
+      vehiclesRef.current = [...currentFleet, newEv];
       setVehicles((prev) => [...prev, newEv]);
       setSelectedVehicleId(newEv.id);
       if (switchToVehiclesTab) {
@@ -245,7 +265,46 @@ export default function App() {
       addToast(`${newEv.id} (${newEv.model}) added · SoC: ${soc}% · Station ${station}`);
       return newEv;
     },
-    [addToast, vehicles]
+    [addToast]
+  );
+
+  const removeVehicle = useCallback(
+    (queryOrId, { fromAI = false, switchToVehiclesTab = false } = {}) => {
+      const currentFleet = vehiclesRef.current;
+      if (currentFleet.length <= 1) {
+        addToast('Cannot remove the last vehicle in the fleet.', 'warning');
+        return null;
+      }
+
+      const q = String(queryOrId || '').trim().toLowerCase();
+      if (!q) return null;
+
+      const target =
+        currentFleet.find((v) => v.id.toLowerCase() === q) ||
+        currentFleet.find((v) => v.model.toLowerCase().includes(q)) ||
+        currentFleet.find((v) => v.owner.toLowerCase().includes(q)) ||
+        currentFleet.find((v) => v.id.toLowerCase().includes(q));
+
+      if (!target) {
+        addToast(`No vehicle found matching "${queryOrId}"`, 'warning');
+        return null;
+      }
+
+      const remaining = currentFleet.filter((v) => v.id !== target.id);
+      vehiclesRef.current = remaining;
+      setVehicles(remaining);
+      setSelectedVehicleId((cur) => (cur === target.id ? remaining[0]?.id || null : cur));
+
+      if (switchToVehiclesTab) {
+        setActiveTab('vehicles');
+        setCustomFocus(null);
+      }
+      addToast(
+        `${target.id} (${target.model}) removed from fleet${fromAI ? ' by Neuro Twin' : ''}`
+      );
+      return target;
+    },
+    [addToast]
   );
 
   // ── 3. Stations Handlers ──
@@ -570,6 +629,7 @@ export default function App() {
       fleet: vehicles.map((v) => ({
         id: v.id,
         model: v.model,
+        owner: v.owner,
         soc_pct: v.soc,
         station: v.station,
         range_km: v.range,
@@ -690,6 +750,7 @@ export default function App() {
             nextVehicleId={`EV-${evCounterRef.current}`}
             onSelectVehicle={setSelectedVehicleId}
             onAddVehicle={(evInput) => registerVehicle(evInput)}
+            onDeleteVehicle={(id) => removeVehicle(id)}
           />
         )}
 
@@ -779,6 +840,9 @@ export default function App() {
         telemetry={neuroTelemetry}
         onInspectTab={handleSelectTab}
         onAddVehicleFromAI={(evData) => registerVehicle(evData, { switchToVehiclesTab: true })}
+        onDeleteVehicleFromAI={(query) =>
+          removeVehicle(query, { fromAI: true, switchToVehiclesTab: true })
+        }
         onShowToast={addToast}
       />
     </div>

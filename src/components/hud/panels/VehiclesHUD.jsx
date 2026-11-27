@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Plus, Zap, Link2, CheckCircle2, X, Car } from 'lucide-react';
+import { Plus, Zap, Link2, CheckCircle2, X, Car, Trash2 } from 'lucide-react';
 import { getSoCCategoryColor } from '../../../data/initialData';
 
 const STATION_OPTIONS = [
@@ -22,6 +22,7 @@ export default function VehiclesHUD({
   nextVehicleId,
   onSelectVehicle,
   onAddVehicle,
+  onDeleteVehicle,
 }) {
   const selected = vehicles.find((v) => v.id === selectedVehicleId) || vehicles[0];
   const [modalOpen, setModalOpen] = useState(false);
@@ -119,17 +120,19 @@ export default function VehiclesHUD({
                   <th className="px-3 py-2.5">Station</th>
                   <th className="px-3 py-2.5">Range</th>
                   <th className="px-3 py-2.5">Status</th>
+                  <th className="w-8 px-2 py-2.5" aria-label="Actions" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {vehicles.map((ev) => {
                   const isSelected = ev.id === selected?.id;
                   const socColor = getSoCCategoryColor(ev.soc);
+                  const canDelete = vehicles.length > 1;
                   return (
                     <tr
                       key={ev.id}
                       onClick={() => onSelectVehicle(ev.id)}
-                      className={`cursor-pointer transition-colors ${
+                      className={`group cursor-pointer transition-colors ${
                         isSelected ? 'bg-sky-50/90' : 'hover:bg-slate-50/80'
                       }`}
                     >
@@ -169,6 +172,24 @@ export default function VehiclesHUD({
                           {ev.status === 'Ready' && <CheckCircle2 className="h-2.5 w-2.5" />}
                           {ev.status}
                         </span>
+                      </td>
+                      <td className="px-2 py-2.5 text-right">
+                        <button
+                          type="button"
+                          disabled={!canDelete}
+                          title={
+                            canDelete
+                              ? `Remove ${ev.model} (${ev.id})`
+                              : 'At least 1 vehicle must remain'
+                          }
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (canDelete && onDeleteVehicle) onDeleteVehicle(ev.id);
+                          }}
+                          className="rounded-lg p-1 text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-25 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       </td>
                     </tr>
                   );
@@ -221,6 +242,21 @@ export default function VehiclesHUD({
                 <div className="text-xs font-bold text-slate-800">{selected.station}</div>
               </div>
             </div>
+
+            <button
+              type="button"
+              disabled={vehicles.length <= 1}
+              onClick={() => onDeleteVehicle && onDeleteVehicle(selected.id)}
+              title={
+                vehicles.length <= 1
+                  ? 'Cannot remove the last remaining vehicle'
+                  : `Remove ${selected.model} (${selected.id})`
+              }
+              className="mt-1 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-red-200/90 bg-red-50/70 px-3 py-2 text-xs font-bold text-red-600 transition hover:border-red-300 hover:bg-red-100/80 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Remove Vehicle
+            </button>
           </motion.aside>
         )}
       </div>

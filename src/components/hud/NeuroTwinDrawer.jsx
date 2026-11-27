@@ -176,30 +176,47 @@ function mergeAndCapMemories(existing, incoming) {
 function parseAssistantReply(rawText) {
   let working = rawText || '';
 
-  // Parse [[ADD_EV:{...}]] action tag if present
-  let addEvPayload = null;
-  const addEvMatch = working.match(/\[\[ADD_EV:(\{[\s\S]*?\})\]\]/i);
-  if (addEvMatch) {
+  // Parse all [[ADD_EV:{...}]] action tags via matchAll
+  const addEvPayloads = [];
+  for (const match of working.matchAll(/\[\[ADD_EV:(\{[\s\S]*?\})\]\]/gi)) {
     try {
-      addEvPayload = JSON.parse(addEvMatch[1]);
+      const parsed = JSON.parse(match[1]);
+      if (parsed && typeof parsed === 'object') {
+        addEvPayloads.push(parsed);
+      }
     } catch {
-      addEvPayload = null;
+      // ignore malformed tag
     }
-    working = working.replace(/\[\[ADD_EV:\{[\s\S]*?\}\]\]/gi, '').trim();
   }
+  working = working.replace(/\[\[ADD_EV:\{[\s\S]*?\}\]\]/gi, '').trim();
+
+  // Parse all [[DELETE_EV:{...}]] action tags via matchAll
+  const deleteEvPayloads = [];
+  for (const match of working.matchAll(/\[\[DELETE_EV:(\{[\s\S]*?\})\]\]/gi)) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      if (parsed && typeof parsed === 'object') {
+        const query = parsed.query || parsed.id || parsed.model || parsed.owner;
+        if (query) deleteEvPayloads.push({ ...parsed, query: String(query) });
+      }
+    } catch {
+      // ignore malformed tag
+    }
+  }
+  working = working.replace(/\[\[DELETE_EV:\{[\s\S]*?\}\]\]/gi, '').trim();
 
   const tagRegex = /\[\[INSPECT:([a-z-]+)\]\]/i;
-  const match = working.match(tagRegex);
+  const inspectMatch = working.match(tagRegex);
   let inspectTab = null;
-  if (match) {
-    const candidate = match[1].toLowerCase();
+  if (inspectMatch) {
+    const candidate = inspectMatch[1].toLowerCase();
     if (NAV_TABS.some((t) => t.id === candidate)) {
       inspectTab = candidate;
     }
   }
   const cleanText = working.replace(/\[\[INSPECT:[a-z-]+\]\]/gi, '').trim();
 
-  if (!inspectTab && !addEvPayload) {
+  if (!inspectTab && addEvPayloads.length === 0 && deleteEvPayloads.length === 0) {
     const lower = cleanText.toLowerCase();
     if (lower.includes('bank alpha') || lower.includes('flagged cell') || lower.includes('bank beta')) {
       inspectTab = 'battery';
@@ -212,7 +229,7 @@ function parseAssistantReply(rawText) {
     }
   }
 
-  return { cleanText, inspectTab, addEvPayload };
+  return { cleanText, inspectTab, addEvPayloads, deleteEvPayloads };
 }
 
 function formatThreadTime(iso) {
@@ -228,9 +245,18 @@ function formatThreadTime(iso) {
   }
 }
 
+/** Normalize single-asterisk emphasis (*Label:*) -> **Label:** before inline rendering */
+function normalizeMarkdownEmphasis(text) {
+  return String(text || '').replace(
+    /(^|[^*])\*([^\s*](?:[^*]*?[^\s*])?)\*(?!\*)/g,
+    '$1**$2**'
+  );
+}
+
 /** Lightweight inline formatter rendering **bold** and crisp bullets cleanly without raw tables */
 function renderInlineBold(text) {
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  const normalized = normalizeMarkdownEmphasis(text);
+  const parts = normalized.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
   return parts.map((part, idx) => {
     if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
       return (
@@ -282,6 +308,7 @@ export default function NeuroTwinDrawer({
   telemetry,
   onInspectTab,
   onAddVehicleFromAI,
+  onDeleteVehicleFromAI,
   onShowToast,
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
@@ -696,20 +723,34 @@ export default function NeuroTwinDrawer({
           throw new Error(msg);
         }
 
-        const { cleanText, inspectTab, addEvPayload } = parseAssistantReply(data.reply || '');
-        let addedVehicle = null;
-        if (addEvPayload && onAddVehicleFromAI) {
-          addedVehicle = onAddVehicleFromAI(addEvPayload);
+        const { cleanText, inspectTab, addEvPayloads, deleteEvPayloads } = parseAssistantReply(
+          data.reply || ''
+        );
+
+        const addedVehicles = [];
+        if (addEvPayloads.length > 0 && onAddVehicleFromAI) {
+          for (const payload of addEvPayloads) {
+            const added = onAddVehicleFromAI(payload);
+            if (added) addedVehicles.push({ id: added.id, model: added.model });
+          }
         }
 
+        const deletedVehicles = [];
+        if (deleteEvPayloads.length > 0 && onDeleteVehicleFromAI) {
+          for (const payload of deleteEvPayloads) {
+            const removed = onDeleteVehicleFromAI(payload.query);
+            if (removed) deletedVehicles.push({ id: removed.id, model: removed.model });
+          }
+        }
+
+        const fleetChanged = addedVehicles.length > 0 || deletedVehicles.length > 0;
         const assistantMsg = {
           id: `msg-${Date.now()}-ai`,
           role: 'assistant',
           content: cleanText,
-          inspectTab: addedVehicle ? 'vehicles' : inspectTab,
-          addedVehicle: addedVehicle
-            ? { id: addedVehicle.id, model: addedVehicle.model }
-            : null,
+          inspectTab: fleetChanged ? 'vehicles' : inspectTab,
+          addedVehicles,
+          deletedVehicles,
           modelUsed: data.model_used || data.model || modelToUse,
           ts: new Date().toISOString(),
         };
@@ -754,6 +795,7 @@ export default function NeuroTwinDrawer({
       isSending,
       memories,
       onAddVehicleFromAI,
+      onDeleteVehicleFromAI,
       selectedModel,
       telemetry,
     ]
@@ -1191,14 +1233,36 @@ export default function NeuroTwinDrawer({
                             <FormattedResponse content={msg.content} />
                           )}
 
-                          {!isUser && msg.addedVehicle && (
-                            <div className="mt-2.5 inline-flex items-center gap-1.5 rounded-lg border border-emerald-400/35 bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold text-emerald-300">
-                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-                              <span>
-                                Added {msg.addedVehicle.model} ({msg.addedVehicle.id}) to 3D Fleet
-                              </span>
-                            </div>
-                          )}
+                          {!isUser &&
+                            (msg.addedVehicles?.length > 0
+                              ? msg.addedVehicles
+                              : msg.addedVehicle
+                              ? [msg.addedVehicle]
+                              : []
+                            ).map((ev) => (
+                              <div
+                                key={`added-${ev.id}`}
+                                className="mt-2 mr-1.5 inline-flex items-center gap-1.5 rounded-lg border border-emerald-400/35 bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold text-emerald-300"
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                                <span>
+                                  Added {ev.model} ({ev.id}) to 3D Fleet
+                                </span>
+                              </div>
+                            ))}
+
+                          {!isUser &&
+                            msg.deletedVehicles?.map((ev) => (
+                              <div
+                                key={`deleted-${ev.id}`}
+                                className="mt-2 mr-1.5 inline-flex items-center gap-1.5 rounded-lg border border-rose-400/35 bg-rose-500/15 px-2.5 py-1 text-[11px] font-semibold text-rose-300"
+                              >
+                                <Trash2 className="h-3.5 w-3.5 text-rose-400" />
+                                <span>
+                                  ✓ Removed {ev.model} ({ev.id})
+                                </span>
+                              </div>
+                            ))}
 
                           {!isUser && (targetTabObj || msg.modelUsed) && (
                             <div className="mt-2.5 flex flex-wrap items-center gap-2">

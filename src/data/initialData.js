@@ -3,6 +3,16 @@ export const PACK_CAPACITY_KWH = 72;
 export const INITIAL_EVS = [
   {
     id: 'EV-1001',
+    model: 'Porsche Taycan Turbo S',
+    soc: 78,
+    station: 'C – Powai',
+    range: 410,
+    rate: '250 kW',
+    status: 'Charging',
+    owner: 'Sudarshan',
+  },
+  {
+    id: 'EV-1002',
     model: 'Tata Nexon EV',
     soc: 32,
     station: 'A – Andheri',
@@ -12,7 +22,7 @@ export const INITIAL_EVS = [
     owner: 'Rahul M.',
   },
   {
-    id: 'EV-1002',
+    id: 'EV-1003',
     model: 'MG ZS EV',
     soc: 55,
     station: 'B – BKC',
@@ -22,7 +32,7 @@ export const INITIAL_EVS = [
     owner: 'Priya S.',
   },
   {
-    id: 'EV-1003',
+    id: 'EV-1004',
     model: 'Hyundai Ioniq 5',
     soc: 18,
     station: 'A – Andheri',
@@ -32,7 +42,7 @@ export const INITIAL_EVS = [
     owner: 'Amit K.',
   },
   {
-    id: 'EV-1004',
+    id: 'EV-1005',
     model: 'Kia EV6',
     soc: 71,
     station: 'C – Powai',
@@ -42,7 +52,7 @@ export const INITIAL_EVS = [
     owner: 'Sneha R.',
   },
   {
-    id: 'EV-1005',
+    id: 'EV-1006',
     model: 'BYD Atto 3',
     soc: 44,
     station: 'B – BKC',
