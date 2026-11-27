@@ -40,18 +40,18 @@ const GROQ_MODELS = [
 const STARTERS_BY_TAB = {
   dashboard: [
     'Explain current Solar vs Grid load',
-    'Which charging hub needs relief right now?',
-    'Summarize Mumbai Metro grid health',
+    'Which TN · KA · KL hub needs relief right now?',
+    'Summarize Chennai Metro Zone grid health',
   ],
   vehicles: [
     'Which EV in our fleet has the lowest SoC?',
-    'Compare EV-1001 and EV-1004 range & status',
-    'How fast can EV-1003 reach 80% at 120 kW?',
+    'Compare Vehicle 1 and Vehicle 2 range & status',
+    'How fast can Vehicle 2 reach 90% at 240 kW?',
   ],
   stations: [
     'Which station has the shortest wait & best score?',
-    'Compare Station A vs Station B queues',
-    'Inspect Station C solar capacity in 3D',
+    'Compare Chennai TN vs Bengaluru KA queues',
+    'Inspect Station C (Kochi KL) solar capacity in 3D',
   ],
   charging: [
     'How much will charging to 80% cost in ₹?',

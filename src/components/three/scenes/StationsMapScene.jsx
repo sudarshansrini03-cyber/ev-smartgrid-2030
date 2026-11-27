@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
-import MumbaiTerrain from './MumbaiTerrain';
+import RegionalGridTerrain from './RegionalGridTerrain';
 import { SleekEVModel } from '../SharedModels';
 import { STATIONS_DATA } from '../../../data/initialData';
 
@@ -29,7 +29,7 @@ function RotatingSolarCanopy() {
 export default function StationsMapScene({ selectedStationId, onSelectStation }) {
   return (
     <group>
-      <MumbaiTerrain />
+      <RegionalGridTerrain />
 
       {STATIONS_DATA.map((st) => {
         const isSelected = selectedStationId === st.id;

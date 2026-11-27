@@ -3,7 +3,14 @@ import * as THREE from 'three';
 import { Html } from '@react-three/drei';
 import { EnergyParticleStream, SleekEVModel } from '../SharedModels';
 
-export default function ChargingBayScene({ currentSoC, targetSoC, isCharging, powerKw, stationName }) {
+export default function ChargingBayScene({
+  vehicle,
+  currentSoC,
+  targetSoC,
+  isCharging,
+  powerKw,
+  stationName,
+}) {
   const cablePoints = useMemo(
     () => [
       [-2.15, 1.45, -0.3],
@@ -111,16 +118,23 @@ export default function ChargingBayScene({ currentSoC, targetSoC, isCharging, po
       />
 
       {/* Target SoC Marker Badge */}
-      <Html position={[0.85, 1.9, 0]} center distanceFactor={10}>
-        <div className="pointer-events-none flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 shadow-md backdrop-blur-xl">
-          <span
-            className={`h-2 w-2 rounded-full ${
-              isCharging ? 'animate-ping bg-sky-500' : 'bg-emerald-500'
-            }`}
-          />
-          <span className="font-mono text-xs font-bold text-slate-900">
-            {Math.round(currentSoC)}% → {targetSoC}%
-          </span>
+      <Html position={[0.85, 1.98, 0]} center distanceFactor={10}>
+        <div className="pointer-events-none flex flex-col items-center gap-0.5 rounded-2xl border border-slate-200 bg-white/90 px-3.5 py-1.5 shadow-md backdrop-blur-xl">
+          {vehicle && (
+            <div className="whitespace-nowrap text-[10px] font-bold uppercase tracking-wider text-sky-700">
+              {vehicle.id} · {vehicle.model}
+            </div>
+          )}
+          <div className="flex items-center gap-2 whitespace-nowrap">
+            <span
+              className={`h-2 w-2 rounded-full ${
+                isCharging ? 'animate-ping bg-sky-500' : 'bg-emerald-500'
+              }`}
+            />
+            <span className="font-mono text-xs font-bold text-slate-900">
+              {Math.round(currentSoC)}% → {targetSoC}%
+            </span>
+          </div>
         </div>
       </Html>
     </group>

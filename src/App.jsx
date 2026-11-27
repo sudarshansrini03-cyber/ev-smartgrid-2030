@@ -46,7 +46,7 @@ export default function App() {
   const vehiclesRef = useRef(INITIAL_EVS);
   vehiclesRef.current = vehicles;
   const [selectedVehicleId, setSelectedVehicleId] = useState(INITIAL_EVS[0].id);
-  const evCounterRef = useRef(1007);
+  const evCounterRef = useRef(3);
 
   // 3. Stations State
   const [gpsStatus, setGpsStatus] = useState('idle');
@@ -55,11 +55,11 @@ export default function App() {
   // 4. Smart Charging State
   const [chargingState, setChargingState] = useState({
     selectedVehicleId: INITIAL_EVS[0].id,
-    stationKw: 80,
-    stationShortName: 'Station A – Andheri East',
-    startSoC: 32,
-    targetSoC: 80,
-    currentSoC: 32,
+    stationKw: 150,
+    stationShortName: 'Station A – Chennai TN',
+    startSoC: INITIAL_EVS[0].soc,
+    targetSoC: 95,
+    currentSoC: INITIAL_EVS[0].soc,
     energyUsed: 0,
     timeLeftMin: 0,
     estCost: '0',
@@ -96,8 +96,8 @@ export default function App() {
 
   // 7. Sell Charge (P2P) State
   const [p2pState, setP2pState] = useState({
-    sellerIdx: 1, // EV-1002 (55%) by default so 10 kWh fits comfortably
-    buyerIdx: 0,  // EV-1001 (32%)
+    sellerIdx: 0, // Vehicle 1 (78%) by default so 10 kWh fits comfortably
+    buyerIdx: 1,  // Vehicle 2 (64%)
     energyKwh: 10,
     pricePerKwh: 12,
     summary: null,
@@ -128,6 +128,23 @@ export default function App() {
     setSelectedStationId(null);
     addToast('Camera view reset to studio framing');
   }, [addToast]);
+
+  // Clear any stale localStorage fleet cache keys containing legacy EV-100X IDs
+  useEffect(() => {
+    try {
+      const keysToCheck = Object.keys(localStorage).filter((k) =>
+        /fleet|vehicle|ev_grid|smartgrid_evs/i.test(k)
+      );
+      for (const k of keysToCheck) {
+        const val = localStorage.getItem(k) || '';
+        if (/EV-100\d/i.test(val)) {
+          localStorage.removeItem(k);
+        }
+      }
+    } catch {
+      // Ignore storage access restrictions
+    }
+  }, []);
 
   // Sync Connected EVs KPI dynamically with fleet additions and deletions
   const prevFleetSizeRef = useRef(INITIAL_EVS.length);
@@ -200,7 +217,7 @@ export default function App() {
       setAiAdvice(data.recommendation);
       addToast('AI BMS recommendation updated');
     } catch {
-      const fallback = `Grid demand is at ${stats.demand}% with ${stats.solar}% solar availability. Maintain 80%/20% Dual-Bank split and route non-critical fleet loads to Station C (Powai Solar).`;
+      const fallback = `Grid demand is at ${stats.demand}% with ${stats.solar}% solar availability. Maintain 80%/20% Dual-Bank split and route non-critical fleet loads to Station C (Kochi KL Solar).`;
       setAiAdvice(fallback);
       addToast('AI BMS local analysis ready');
     } finally {
@@ -211,9 +228,19 @@ export default function App() {
   // ── 2. Vehicles Handlers ──
   const normalizeStationLabel = (rawStation) => {
     const s = String(rawStation || '').toLowerCase();
-    if (s.includes('powai') || s.startsWith('c')) return 'C – Powai';
-    if (s.includes('bkc') || s.includes('bandra') || s.startsWith('b')) return 'B – BKC';
-    return 'A – Andheri';
+    if (s.includes('kochi') || s.includes('kerala') || s.includes('kl') || s.startsWith('c')) {
+      return 'C - Kochi KL';
+    }
+    if (
+      s.includes('bengaluru') ||
+      s.includes('bangalore') ||
+      s.includes('karnataka') ||
+      s.includes('ka') ||
+      s.startsWith('b')
+    ) {
+      return 'B - Bengaluru KA';
+    }
+    return 'A - Chennai TN';
   };
 
   const registerVehicle = useCallback(
@@ -222,14 +249,14 @@ export default function App() {
       const station = normalizeStationLabel(input?.station);
       const validStatuses = ['Charging', 'Connected', 'Ready'];
       const status = validStatuses.includes(input?.status) ? input.status : 'Charging';
-      const defaultKw = station.startsWith('B') ? 120 : station.startsWith('C') ? 60 : 80;
+      const defaultKw = station.startsWith('B') ? 240 : station.startsWith('C') ? 80 : 150;
       const numericKw = parseInt(String(input?.chargeRate || input?.rate || defaultKw), 10) || defaultKw;
       const range =
-        Number(input?.range) > 0 ? Math.round(Number(input.range)) : Math.round((soc / 100) * 420);
+        Number(input?.range) > 0 ? Math.round(Number(input.range)) : Math.round((soc / 100) * 450);
 
       let assignedId = String(input?.id || '').trim();
       if (!assignedId) {
-        assignedId = `EV-${evCounterRef.current++}`;
+        assignedId = `Vehicle ${evCounterRef.current++}`;
       } else {
         const numMatch = assignedId.match(/(\d+)$/);
         if (numMatch) {
@@ -241,7 +268,7 @@ export default function App() {
       const currentFleet = vehiclesRef.current;
       let uniqueId = assignedId;
       while (currentFleet.some((v) => v.id.toLowerCase() === uniqueId.toLowerCase())) {
-        uniqueId = `EV-${evCounterRef.current++}`;
+        uniqueId = `Vehicle ${evCounterRef.current++}`;
       }
 
       const newEv = {
@@ -250,6 +277,7 @@ export default function App() {
         soc,
         station,
         range,
+        chargeRate: numericKw,
         rate: `${numericKw} kW`,
         status,
         owner: String(input?.owner || 'Sudarshan').trim(),
@@ -294,6 +322,18 @@ export default function App() {
       vehiclesRef.current = remaining;
       setVehicles(remaining);
       setSelectedVehicleId((cur) => (cur === target.id ? remaining[0]?.id || null : cur));
+      if (remaining[0]) {
+        setChargingState((prev) =>
+          prev.selectedVehicleId === target.id && !prev.isCharging
+            ? {
+                ...prev,
+                selectedVehicleId: remaining[0].id,
+                startSoC: remaining[0].soc,
+                currentSoC: remaining[0].soc,
+              }
+            : prev
+        );
+      }
 
       if (switchToVehiclesTab) {
         setActiveTab('vehicles');
@@ -602,6 +642,8 @@ export default function App() {
   };
 
   const selectedVehicle = vehicles.find((v) => v.id === selectedVehicleId) || vehicles[0];
+  const chargingVehicle =
+    vehicles.find((v) => v.id === chargingState.selectedVehicleId) || vehicles[0];
   const sellerVehicle = vehicles[p2pState.sellerIdx] || vehicles[0];
   const buyerVehicle = vehicles[p2pState.buyerIdx] || vehicles[1] || vehicles[0];
 
@@ -693,6 +735,7 @@ export default function App() {
         selectedStationId={selectedStationId}
         onSelectStation={handleSelectStation}
         chargingState={chargingState}
+        chargingVehicle={chargingVehicle}
         energyMetrics={energyMetrics}
         energyRoutes={energyRoutes}
         balanceRippleKey={balanceRippleKey}
@@ -747,7 +790,7 @@ export default function App() {
             key="hud-vehicles"
             vehicles={vehicles}
             selectedVehicleId={selectedVehicleId}
-            nextVehicleId={`EV-${evCounterRef.current}`}
+            nextVehicleId={`Vehicle ${evCounterRef.current}`}
             onSelectVehicle={setSelectedVehicleId}
             onAddVehicle={(evInput) => registerVehicle(evInput)}
             onDeleteVehicle={(id) => removeVehicle(id)}
@@ -772,12 +815,18 @@ export default function App() {
             chargingState={chargingState}
             onChangeVehicle={(id) => {
               const ev = vehicles.find((v) => v.id === id);
-              setChargingState((prev) => ({
-                ...prev,
-                selectedVehicleId: id,
-                startSoC: ev ? ev.soc : prev.startSoC,
-                currentSoC: ev ? ev.soc : prev.currentSoC,
-              }));
+              setChargingState((prev) => {
+                const nextStart = ev ? ev.soc : prev.startSoC;
+                const nextTarget =
+                  prev.targetSoC <= nextStart ? Math.min(100, nextStart + 15) : prev.targetSoC;
+                return {
+                  ...prev,
+                  selectedVehicleId: id,
+                  startSoC: nextStart,
+                  currentSoC: nextStart,
+                  targetSoC: nextTarget,
+                };
+              });
             }}
             onChangeStationKw={(kw) => {
               const opt = CHARGING_STATIONS_OPTIONS.find((o) => o.kw === kw);

@@ -44,7 +44,7 @@ export default function StationsHUD({
             <div>
               <div className="text-xs font-bold text-slate-900">GPS Location Acquired</div>
               <div className="mt-0.5 text-[11px] text-slate-600">
-                Mumbai, MH — 19.0760° N, 72.8777° E
+                Chennai, TN — 13.0827° N, 80.2707° E
               </div>
               <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-semibold">
                 <span
@@ -94,6 +94,11 @@ export default function StationsHUD({
                     <div className="text-[11px] text-slate-500">
                       {st.distanceKm} km away · {st.type}
                     </div>
+                    {st.coordsLabel && (
+                      <div className="mt-0.5 font-mono text-[10px] font-medium text-slate-400">
+                        {st.coordsLabel}
+                      </div>
+                    )}
                   </div>
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-emerald-500 font-mono text-[11px] font-extrabold text-emerald-700">
                     {st.score}%

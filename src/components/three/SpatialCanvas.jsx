@@ -20,6 +20,7 @@ export default function SpatialCanvas({
   selectedStationId,
   onSelectStation,
   chargingState,
+  chargingVehicle,
   energyMetrics,
   energyRoutes,
   balanceRippleKey,
@@ -64,6 +65,7 @@ export default function SpatialCanvas({
 
             {activeTab === 'charging' && (
               <ChargingBayScene
+                vehicle={chargingVehicle}
                 currentSoC={chargingState.currentSoC}
                 targetSoC={chargingState.targetSoC}
                 isCharging={chargingState.isCharging}

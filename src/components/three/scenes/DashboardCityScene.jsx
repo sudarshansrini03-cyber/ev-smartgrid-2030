@@ -1,7 +1,7 @@
 import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
-import MumbaiTerrain from './MumbaiTerrain';
+import RegionalGridTerrain from './RegionalGridTerrain';
 import {
   EnergyParticleStream,
   SleekEVModel,
@@ -54,9 +54,9 @@ export default function DashboardCityScene({ stats, simPulseKey }) {
 
   return (
     <group key={simPulseKey > 0 ? 'active-grid' : 'init-grid'}>
-      <MumbaiTerrain showTraffic />
+      <RegionalGridTerrain showTraffic />
 
-      {/* Miniature 3D Solar Farm (Powai East Ridge) */}
+      {/* Miniature 3D Solar Farm (Kochi Infopark Solar Corridor) */}
       <group position={[6.4, 0.28, 2.8]}>
         <mesh position={[0, 0.04, 0]} receiveShadow>
           <boxGeometry args={[3.1, 0.08, 2.4]} />

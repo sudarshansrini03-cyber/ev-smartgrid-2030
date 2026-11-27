@@ -4,16 +4,16 @@ import { Plus, Zap, Link2, CheckCircle2, X, Car, Trash2 } from 'lucide-react';
 import { getSoCCategoryColor } from '../../../data/initialData';
 
 const STATION_OPTIONS = [
-  { label: 'A – Andheri', defaultKw: 80 },
-  { label: 'B – BKC', defaultKw: 120 },
-  { label: 'C – Powai', defaultKw: 60 },
+  { label: 'A - Chennai TN', defaultKw: 150 },
+  { label: 'B - Bengaluru KA', defaultKw: 240 },
+  { label: 'C - Kochi KL', defaultKw: 80 },
 ];
 
 const QUICK_PRESETS = [
+  { model: 'Porsche Taycan Turbo S', maxRange: 525, kw: 250 },
+  { model: 'Maserati GranTurismo Folgore', maxRange: 450, kw: 220 },
   { model: 'Mahindra XEV 9e', maxRange: 530, kw: 140 },
   { model: 'Tesla Model 3', maxRange: 513, kw: 170 },
-  { model: 'Tata Curvv EV', maxRange: 430, kw: 70 },
-  { model: 'Porsche Taycan', maxRange: 503, kw: 240 },
 ];
 
 export default function VehiclesHUD({
@@ -29,22 +29,22 @@ export default function VehiclesHUD({
 
   const [model, setModel] = useState('');
   const [owner, setOwner] = useState('');
-  const [vehicleId, setVehicleId] = useState(nextVehicleId || 'EV-1006');
-  const [maxRange, setMaxRange] = useState('400');
+  const [vehicleId, setVehicleId] = useState(nextVehicleId || 'Vehicle 3');
+  const [maxRange, setMaxRange] = useState('450');
   const [soc, setSoc] = useState(65);
-  const [station, setStation] = useState('A – Andheri');
+  const [station, setStation] = useState('A - Chennai TN');
   const [status, setStatus] = useState('Charging');
-  const [chargeRateKw, setChargeRateKw] = useState('80');
+  const [chargeRateKw, setChargeRateKw] = useState('150');
   const [formError, setFormError] = useState('');
 
   useEffect(() => {
     if (modalOpen) {
-      setVehicleId(nextVehicleId || 'EV-1006');
+      setVehicleId(nextVehicleId || 'Vehicle 3');
       setFormError('');
     }
   }, [modalOpen, nextVehicleId]);
 
-  const numericMaxRange = Math.max(50, Number(maxRange) || 400);
+  const numericMaxRange = Math.max(50, Number(maxRange) || 450);
   const estimatedRange = Math.round((soc / 100) * numericMaxRange);
 
   const handleStationChange = (nextStation) => {
@@ -68,18 +68,18 @@ export default function VehiclesHUD({
       soc,
       station,
       status,
-      chargeRate: Number(chargeRateKw) || 80,
+      chargeRate: Number(chargeRateKw) || 150,
       range: estimatedRange,
     });
 
     setModalOpen(false);
     setModel('');
     setOwner('');
-    setMaxRange('400');
+    setMaxRange('450');
     setSoc(65);
-    setStation('A – Andheri');
+    setStation('A - Chennai TN');
     setStatus('Charging');
-    setChargeRateKw('80');
+    setChargeRateKw('150');
     setFormError('');
   };
 
@@ -358,7 +358,7 @@ export default function VehiclesHUD({
                       type="text"
                       value={vehicleId}
                       onChange={(e) => setVehicleId(e.target.value)}
-                      placeholder="EV-1006"
+                      placeholder="Vehicle 3"
                       className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-xs font-bold text-sky-700 placeholder-slate-400 outline-none focus:border-emerald-500"
                     />
                   </div>

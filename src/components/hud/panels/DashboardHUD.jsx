@@ -23,8 +23,8 @@ export default function DashboardHUD({
       >
         <div className="flex items-center justify-between gap-2">
           <div>
-            <h2 className="text-sm font-extrabold text-slate-900">Mumbai Metro Zone</h2>
-            <p className="text-[11px] font-medium text-slate-500">Live Load Balancing Telemetry</p>
+            <h2 className="text-sm font-extrabold text-slate-900">Chennai Metro Zone</h2>
+            <p className="text-[11px] font-medium text-slate-500">Tamil Nadu · Karnataka · Kerala Grid</p>
           </div>
           <button
             onClick={onSimulateCity}

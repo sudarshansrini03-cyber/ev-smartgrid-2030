@@ -96,16 +96,26 @@ export default function ChargingHUD({
               Starting SoC
             </label>
             <select
-              value={startSoC}
+              value={vehicles.some((v) => v.id === selectedVehicleId && v.soc === startSoC) ? selectedVehicleId : '__custom__'}
               disabled={isCharging}
-              onChange={(e) => onChangeStartSoc(Number(e.target.value))}
+              onChange={(e) => {
+                const picked = vehicles.find((v) => v.id === e.target.value);
+                if (picked) {
+                  onChangeVehicle(picked.id);
+                } else {
+                  onChangeStartSoc(startSoC);
+                }
+              }}
               className="w-full rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-xs font-semibold text-slate-800 outline-none focus:border-emerald-500 disabled:opacity-60"
             >
-              <option value={18}>18% – Hyundai Ioniq 5</option>
-              <option value={32}>32% – Tata Nexon EV</option>
-              <option value={44}>44% – BYD Atto 3</option>
-              <option value={55}>55% – MG ZS EV</option>
-              <option value={71}>71% – Kia EV6</option>
+              {vehicles.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.soc}% – {v.model}
+                </option>
+              ))}
+              {!vehicles.some((v) => v.id === selectedVehicleId && v.soc === startSoC) && (
+                <option value="__custom__">{startSoC}% – Custom</option>
+              )}
             </select>
           </div>
 

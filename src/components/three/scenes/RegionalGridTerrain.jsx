@@ -2,17 +2,17 @@ import React, { useMemo, useRef, useLayoutEffect } from 'react';
 import * as THREE from 'three';
 
 /**
- * Architectural scale-model terrain of Mumbai Metro Zone:
- * - Pale ice-blue coastal water contours (#E0F2FE)
- * - Extruded satin-white peninsula & Powai lake contour
- * - InstancedMesh minimalist city blocks (~88 buildings)
+ * Architectural scale-model terrain of the Chennai Metro Zone (TN · KA · KL Corridor):
+ * - Pale ice-blue coastal Bay of Bengal & Arabian Sea water contours (#E0F2FE)
+ * - Extruded satin-white southern corridor landmass & Kochi solar backwater inlet
+ * - InstancedMesh minimalist architectural city blocks
  */
-export default function MumbaiTerrain({ showTraffic = false }) {
+export default function RegionalGridTerrain({ showTraffic = false }) {
   const buildingsRef = useRef();
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
-  // Extruded Mumbai Peninsula base shape
-  const peninsulaGeometry = useMemo(() => {
+  // Extruded Southern EV Corridor landmass shape
+  const corridorGeometry = useMemo(() => {
     const s = new THREE.Shape();
     s.moveTo(-8.2, -5.8);
     s.lineTo(8.5, -5.8);
@@ -39,9 +39,9 @@ export default function MumbaiTerrain({ showTraffic = false }) {
   const blocks = useMemo(() => {
     const items = [];
     const forbidden = [
-      [-5.2, -2.6], // Station A
-      [-0.8, 3.4],  // Station B
-      [5.4, -1.8],  // Station C
+      [-5.2, -2.6], // Station A - Chennai TN
+      [-0.8, 3.4],  // Station B - Bengaluru KA
+      [5.4, -1.8],  // Station C - Kochi KL
       [6.4, 2.8],   // Solar Farm
       [-5.6, 2.4],  // Substation
     ];
@@ -50,14 +50,12 @@ export default function MumbaiTerrain({ showTraffic = false }) {
       const gx = ((i * 37) % 140) / 10 - 6.8;
       const gz = ((i * 53) % 100) / 10 - 4.8;
 
-      // Keep on landmass roughly
       if (gx < -3.6 && gz > 1.6) continue;
       if (gx > 7.6 || gz > 4.8 || gz < -5.0) continue;
 
       const tooClose = forbidden.some(([fx, fz]) => Math.hypot(gx - fx, gz - fz) < 1.55);
       if (tooClose) continue;
 
-      // Keep main road corridors clear
       if (Math.abs(gz - 0.5) < 0.48 || Math.abs(gx - 0.8) < 0.48) continue;
 
       const w = 0.34 + ((i * 17) % 5) * 0.09;
@@ -94,18 +92,18 @@ export default function MumbaiTerrain({ showTraffic = false }) {
         <meshStandardMaterial color="#F1F5F9" roughness={0.85} />
       </mesh>
 
-      {/* Satin-white extruded Mumbai Metro landmass */}
-      <mesh geometry={peninsulaGeometry} position={[0, 0.03, 0]} receiveShadow castShadow>
+      {/* Satin-white extruded TN · KA · KL Corridor landmass */}
+      <mesh geometry={corridorGeometry} position={[0, 0.03, 0]} receiveShadow castShadow>
         <meshStandardMaterial color="#FFFFFF" roughness={0.78} metalness={0.02} />
       </mesh>
 
-      {/* Powai Lake pale ice-blue inlet */}
+      {/* Kochi Backwater pale ice-blue inlet */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[3.8, 0.285, -2.5]}>
         <circleGeometry args={[1.05, 28]} />
         <meshStandardMaterial color="#E0F2FE" roughness={0.35} />
       </mesh>
 
-      {/* Clean arterial road lines */}
+      {/* Clean arterial highway lines (Chennai - Bengaluru - Kochi) */}
       <mesh position={[0.4, 0.278, 0.5]} receiveShadow>
         <boxGeometry args={[13.6, 0.015, 0.34]} />
         <meshStandardMaterial color="#F1F5F9" roughness={0.8} />
