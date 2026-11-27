@@ -26,12 +26,13 @@ const MEMORIES_STORAGE_KEY = 'neuro_twin_memories';
 const MODEL_STORAGE_KEY = 'neuro_twin_model_v1';
 const MAX_USER_MESSAGES = 10;
 const MAX_MEMORIES = 15;
-const MAX_FILE_CHARS = 4000;
+const MAX_FILE_CHARS = 4500;
+const VISION_MODEL_ID = 'qwen/qwen3.8-27b';
 
 const GROQ_MODELS = [
-  { id: 'openai/gpt-oss-20b', label: 'Fast', desc: 'Fast · Default' },
-  { id: 'openai/gpt-oss-120b', label: 'Deep', desc: 'Reasoning' },
-  { id: 'qwen/qwen-3.8-27b', label: 'Vision', desc: 'Screenshots & Images' },
+  { id: 'openai/gpt-oss-20b', label: 'Fast', shortId: 'gpt-oss-20b', desc: 'Fast · Default' },
+  { id: 'openai/gpt-oss-120b', label: 'Deep', shortId: 'gpt-oss-120b', desc: 'Reasoning' },
+  { id: VISION_MODEL_ID, label: 'Vision', shortId: 'qwen3.8-27b', desc: 'Screenshots & Images' },
 ];
 
 const STARTERS_BY_TAB = {
@@ -118,11 +119,38 @@ function loadMemories() {
 function loadSavedModel() {
   try {
     const saved = localStorage.getItem(MODEL_STORAGE_KEY);
+    if (saved === 'qwen/qwen-3.8-27b') return VISION_MODEL_ID;
     if (GROQ_MODELS.some((m) => m.id === saved)) return saved;
   } catch {
     // ignore
   }
   return GROQ_MODELS[0].id;
+}
+
+function compressImageToJpegBase64(file, maxDim = 1280, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Failed to read image file'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Invalid image format'));
+      img.onload = () => {
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const width = Math.max(1, Math.round(img.width * scale));
+        const height = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src = String(reader.result || '');
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function mergeAndCapMemories(existing, incoming) {
@@ -446,40 +474,65 @@ export default function NeuroTwinDrawer({
     [activeThread?.id]
   );
 
-  const handleImageUpload = (e) => {
+  const handleImageUpload = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    if (file.size > 4 * 1024 * 1024) {
-      if (onShowToast) onShowToast('Image must be under 4 MB', 'warning');
+    if (file.size > 15 * 1024 * 1024) {
+      if (onShowToast) onShowToast('Image must be under 15 MB', 'warning');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setAttachedImage({ name: file.name, dataUrl: String(reader.result || '') });
-      setSelectedModel('qwen/qwen-3.8-27b');
+    try {
+      const compressedDataUrl = await compressImageToJpegBase64(file, 1280, 0.85);
+      setAttachedImage({ name: file.name, dataUrl: compressedDataUrl });
+      setSelectedModel(VISION_MODEL_ID);
       setAutoSwitchedVision(true);
       setShowAttachMenu(false);
-    };
-    reader.readAsDataURL(file);
+    } catch {
+      if (onShowToast) onShowToast('Unable to process screenshot image', 'error');
+    }
   };
 
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      if (onShowToast) onShowToast('Document must be under 5 MB', 'warning');
+      return;
+    }
+
+    const ext = file.name.toLowerCase().split('.').pop();
+    const isBinaryDoc = ext === 'pdf' || ext === 'docx' || ext === 'pptx';
+
     const reader = new FileReader();
     reader.onload = () => {
-      const rawText = String(reader.result || '');
-      const clipped = rawText.slice(0, MAX_FILE_CHARS);
-      setAttachedFile({
-        name: file.name,
-        text: clipped,
-        truncated: rawText.length > MAX_FILE_CHARS,
-      });
+      if (isBinaryDoc) {
+        const dataUrl = String(reader.result || '');
+        const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+        setAttachedFile({
+          name: file.name,
+          text: null,
+          base64: b64,
+        });
+      } else {
+        const rawText = String(reader.result || '');
+        const clipped = rawText.slice(0, MAX_FILE_CHARS);
+        setAttachedFile({
+          name: file.name,
+          text: clipped,
+          base64: null,
+          truncated: rawText.length > MAX_FILE_CHARS,
+        });
+      }
       setShowAttachMenu(false);
     };
-    reader.readAsText(file);
+
+    if (isBinaryDoc) {
+      reader.readAsDataURL(file);
+    } else {
+      reader.readAsText(file);
+    }
   };
 
   const sendMessage = useCallback(
@@ -492,7 +545,7 @@ export default function NeuroTwinDrawer({
       const modelToUse = retryPayload
         ? retryPayload.model
         : imgObj
-        ? 'qwen/qwen-3.8-27b'
+        ? VISION_MODEL_ID
         : selectedModel;
 
       const effectivePrompt =
@@ -562,6 +615,7 @@ export default function NeuroTwinDrawer({
             memories: activeMemories,
             image_base64: imgObj?.dataUrl || null,
             file_text: fileObj?.text || null,
+            file_base64: fileObj?.base64 || null,
             file_name: fileObj?.name || null,
           }),
         });
@@ -584,7 +638,7 @@ export default function NeuroTwinDrawer({
           role: 'assistant',
           content: cleanText,
           inspectTab,
-          modelUsed: data.model || modelToUse,
+          modelUsed: data.model_used || data.model || modelToUse,
           ts: new Date().toISOString(),
         };
 
@@ -654,7 +708,7 @@ export default function NeuroTwinDrawer({
       <input
         ref={fileInputRef}
         type="file"
-        accept=".csv,.json,.txt,text/csv,application/json,text/plain"
+        accept=".pdf,.docx,.pptx,.csv,.json,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/csv,application/json,text/plain,text/markdown"
         onChange={handleFileUpload}
         className="hidden"
       />
@@ -1048,15 +1102,24 @@ export default function NeuroTwinDrawer({
                             <FormattedResponse content={msg.content} />
                           )}
 
-                          {!isUser && targetTabObj && (
-                            <button
-                              type="button"
-                              onClick={() => handleInspectClick(targetTabObj.id)}
-                              className="mt-2.5 inline-flex items-center gap-1 rounded-lg border border-cyan-400/35 bg-cyan-500/10 px-2.5 py-1 font-mono text-[10px] font-semibold text-cyan-300 transition hover:bg-cyan-500/20 hover:text-cyan-200"
-                            >
-                              <ArrowUpRight className="h-3 w-3" />
-                              Inspect {targetTabObj.label} in 3D
-                            </button>
+                          {!isUser && (targetTabObj || msg.modelUsed) && (
+                            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                              {targetTabObj && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleInspectClick(targetTabObj.id)}
+                                  className="inline-flex items-center gap-1 rounded-lg border border-cyan-400/35 bg-cyan-500/10 px-2.5 py-1 font-mono text-[10px] font-semibold text-cyan-300 transition hover:bg-cyan-500/20 hover:text-cyan-200"
+                                >
+                                  <ArrowUpRight className="h-3 w-3" />
+                                  Inspect {targetTabObj.label} in 3D
+                                </button>
+                              )}
+                              {msg.modelUsed && (
+                                <span className="rounded-md border border-slate-800 bg-slate-900/80 px-2 py-0.5 font-mono text-[9.5px] text-slate-400">
+                                  {msg.modelUsed}
+                                </span>
+                              )}
+                            </div>
                           )}
                         </div>
                       </div>
@@ -1138,7 +1201,7 @@ export default function NeuroTwinDrawer({
                         className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-medium text-slate-200 transition hover:bg-white/10"
                       >
                         <FileText className="h-4 w-4 text-emerald-400" />
-                        <span>Attach Data File (.csv/.json/.txt)</span>
+                        <span>Attach Document / File</span>
                       </button>
                     </motion.div>
                   )}
@@ -1152,7 +1215,7 @@ export default function NeuroTwinDrawer({
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: 8, scale: 0.96 }}
                       transition={{ duration: 0.14 }}
-                      className="absolute bottom-[4.5rem] right-12 z-30 w-56 rounded-2xl border border-slate-700/80 bg-[#131824] p-1.5 shadow-2xl backdrop-blur-xl"
+                      className="absolute bottom-[4.5rem] right-12 z-30 w-64 rounded-2xl border border-slate-700/80 bg-[#131824] p-1.5 shadow-2xl backdrop-blur-xl"
                     >
                       {GROQ_MODELS.map((m) => {
                         const active = selectedModel === m.id;
@@ -1172,7 +1235,9 @@ export default function NeuroTwinDrawer({
                             }`}
                           >
                             <div>
-                              <div className="text-xs font-semibold">{m.label}</div>
+                              <div className="text-xs font-semibold">
+                                {m.label} · <span className="font-mono text-[11px] text-cyan-300">{m.shortId}</span>
+                              </div>
                               <div className="text-[10px] text-slate-400">{m.desc}</div>
                             </div>
                             {active && <Check className="h-3.5 w-3.5 text-cyan-400" />}
@@ -1282,7 +1347,12 @@ export default function NeuroTwinDrawer({
                         }}
                         className="inline-flex items-center gap-1 rounded-full border border-slate-700/70 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-slate-300 transition hover:border-slate-600 hover:bg-white/10 hover:text-white disabled:opacity-40"
                       >
-                        <span>{activeModelObj.label}</span>
+                        <span>
+                          {activeModelObj.label} ·{' '}
+                          <span className="font-mono text-[10px] text-cyan-300">
+                            {activeModelObj.shortId}
+                          </span>
+                        </span>
                         <ChevronDown className="h-3 w-3 text-slate-400" />
                       </button>
 

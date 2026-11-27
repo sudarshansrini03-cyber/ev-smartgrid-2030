@@ -1,10 +1,20 @@
+import base64
+import io
 import json
 import os
+import re
+import xml.etree.ElementTree as ET
+import zipfile
 from typing import Any, Dict, List, Literal, Optional
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
+
+try:
+    from pypdf import PdfReader
+except ImportError:
+    PdfReader = None
 
 app = FastAPI(title="EV SmartGrid 2030 BMS Backend")
 
@@ -184,8 +194,18 @@ class ChatMessage(BaseModel):
 AllowedNeuroModel = Literal[
     "openai/gpt-oss-20b",
     "openai/gpt-oss-120b",
-    "qwen/qwen-3.8-27b",
+    "qwen/qwen3.8-27b",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "meta-llama/llama-4-maverick-17b-128e-instruct",
 ]
+
+VISION_FALLBACK_MODELS = [
+    "qwen/qwen3.8-27b",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "meta-llama/llama-4-maverick-17b-128e-instruct",
+]
+
+MAX_DOC_CHARS = 4500
 
 
 class NeuroChatRequest(BaseModel):
@@ -195,8 +215,91 @@ class NeuroChatRequest(BaseModel):
     mode: Literal["chat", "extract_memory"] = "chat"
     model: AllowedNeuroModel = "openai/gpt-oss-20b"
     image_base64: Optional[str] = Field(default=None, max_length=6_000_000)
-    file_text: Optional[str] = Field(default=None, max_length=8000)
+    file_text: Optional[str] = Field(default=None, max_length=10000)
+    file_base64: Optional[str] = Field(default=None, max_length=8_000_000)
     file_name: Optional[str] = Field(default=None, max_length=160)
+
+
+def _extract_document_text(
+    file_name: Optional[str],
+    file_text: Optional[str],
+    file_base64: Optional[str],
+) -> str:
+    if file_text:
+        return file_text.strip()[:MAX_DOC_CHARS]
+    if not file_base64:
+        return ""
+
+    b64_data = file_base64.strip()
+    if "," in b64_data and b64_data.lower().startswith("data:"):
+        b64_data = b64_data.split(",", 1)[1]
+
+    try:
+        raw_bytes = base64.b64decode(b64_data, validate=False)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64 document payload.")
+
+    ext = os.path.splitext((file_name or "").lower())[1]
+
+    if ext == ".pdf":
+        if PdfReader is None:
+            raise HTTPException(status_code=500, detail="pypdf dependency is not installed on server.")
+        try:
+            reader = PdfReader(io.BytesIO(raw_bytes))
+            pages = [page.extract_text() or "" for page in reader.pages]
+            extracted = re.sub(r"\n{3,}", "\n\n", "\n".join(pages)).strip()
+            return (extracted or "[PDF contained no extractable text]")[:MAX_DOC_CHARS]
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Unable to parse PDF file: {exc}")
+
+    if ext == ".docx":
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw_bytes)) as zf:
+                if "word/document.xml" not in zf.namelist():
+                    raise ValueError("Missing word/document.xml")
+                xml_bytes = zf.read("word/document.xml")
+            root = ET.fromstring(xml_bytes)
+            paragraphs: List[str] = []
+            for p in root.iter():
+                if p.tag.endswith("}p") or p.tag == "p":
+                    texts = [
+                        t.text
+                        for t in p.iter()
+                        if (t.tag.endswith("}t") or t.tag == "t") and t.text
+                    ]
+                    if texts:
+                        paragraphs.append("".join(texts))
+            extracted = "\n".join(paragraphs).strip()
+            return (extracted or "[DOCX contained no extractable text]")[:MAX_DOC_CHARS]
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Unable to parse DOCX file: {exc}")
+
+    if ext == ".pptx":
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw_bytes)) as zf:
+                slide_names = [
+                    n for n in zf.namelist()
+                    if re.match(r"^ppt/slides/slide\d+\.xml$", n)
+                ]
+                slide_names.sort(
+                    key=lambda name: int(re.search(r"slide(\d+)\.xml$", name).group(1))
+                )
+                slides_out: List[str] = []
+                for idx, slide_name in enumerate(slide_names, start=1):
+                    root = ET.fromstring(zf.read(slide_name))
+                    texts = [
+                        t.text.strip()
+                        for t in root.iter()
+                        if (t.tag.endswith("}t") or t.tag == "t") and t.text and t.text.strip()
+                    ]
+                    if texts:
+                        slides_out.append(f"[Slide {idx}] " + " ".join(texts))
+            extracted = "\n".join(slides_out).strip()
+            return (extracted or "[PPTX contained no extractable text]")[:MAX_DOC_CHARS]
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Unable to parse PPTX file: {exc}")
+
+    return raw_bytes.decode("utf-8", errors="ignore").strip()[:MAX_DOC_CHARS]
 
 
 def _parse_memory_bullets(raw_text: str) -> List[str]:
@@ -303,7 +406,7 @@ async def neuro_twin_chat(req: NeuroChatRequest):
         f"LIVE_TELEMETRY_SNAPSHOT={telemetry_json}"
     )
 
-    selected_model = "qwen/qwen-3.8-27b" if req.image_base64 else req.model
+    extracted_doc_text = _extract_document_text(req.file_name, req.file_text, req.file_base64)
 
     trimmed_history = req.messages[-20:]
     groq_messages: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
@@ -311,15 +414,14 @@ async def neuro_twin_chat(req: NeuroChatRequest):
     for idx, m in enumerate(trimmed_history):
         is_last_user = idx == len(trimmed_history) - 1 and m.role == "user"
         text_content = m.content
-        if is_last_user and req.file_text:
-            clipped_file = req.file_text[:4000]
+        if is_last_user and extracted_doc_text:
             label = req.file_name or "attached_file"
-            text_content = f"{text_content}\n\n[Attached File: {label}]\n{clipped_file}"
+            text_content = f"{text_content}\n\n[Attached File: {label}]\n{extracted_doc_text}"
 
         if is_last_user and req.image_base64:
             img_url = req.image_base64
             if not img_url.startswith("data:image/"):
-                img_url = f"data:image/png;base64,{img_url}"
+                img_url = f"data:image/jpeg;base64,{img_url}"
             groq_messages.append(
                 {
                     "role": "user",
@@ -332,38 +434,77 @@ async def neuro_twin_chat(req: NeuroChatRequest):
         else:
             groq_messages.append({"role": m.role, "content": text_content})
 
-    payload: Dict[str, Any] = {
-        "model": selected_model,
-        "messages": groq_messages,
-        "max_completion_tokens": 900,
-        "temperature": 0.4,
-    }
-    if selected_model.startswith("openai/gpt-oss"):
-        payload["reasoning_effort"] = "low"
+    if req.image_base64:
+        candidate_models = []
+        if req.model in VISION_FALLBACK_MODELS:
+            candidate_models.append(req.model)
+        for vm in VISION_FALLBACK_MODELS:
+            if vm not in candidate_models:
+                candidate_models.append(vm)
+    else:
+        candidate_models = [req.model]
 
-    try:
-        async with httpx.AsyncClient(timeout=25.0) as client:
-            res = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {groq_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
+    last_error_status = 500
+    last_error_detail = "Unknown Groq API error"
+
+    for model_candidate in candidate_models:
+        payload: Dict[str, Any] = {
+            "model": model_candidate,
+            "messages": groq_messages,
+            "max_completion_tokens": 900,
+            "temperature": 0.4,
+        }
+        if model_candidate.startswith("openai/gpt-oss"):
+            payload["reasoning_effort"] = "low"
+
+        try:
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                res = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {groq_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=504, detail="Groq AI service timed out. Please retry.")
+        except httpx.RequestError as exc:
+            raise HTTPException(status_code=502, detail=f"Network error contacting Groq API: {exc}")
+
+        if res.status_code == 200:
+            data = res.json()
+            reply = data["choices"][0]["message"]["content"]
+            return {"reply": reply, "model": model_candidate, "model_used": model_candidate}
+
+        if res.status_code == 429:
+            raise HTTPException(
+                status_code=429,
+                detail="Groq rate limit reached briefly. Please wait a moment and retry."
             )
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Groq AI service timed out. Please retry.")
-    except httpx.RequestError as exc:
-        raise HTTPException(status_code=502, detail=f"Network error contacting Groq API: {exc}")
 
-    if res.status_code == 429:
-        raise HTTPException(
-            status_code=429,
-            detail="Groq rate limit reached briefly. Please wait a moment and retry."
+        last_error_status = res.status_code
+        last_error_detail = res.text
+        lower_err = res.text.lower()
+        is_model_fallback_eligible = (
+            req.image_base64
+            and res.status_code in (400, 403, 404)
+            and any(
+                token in lower_err
+                for token in (
+                    "model_not_found",
+                    "model_decommissioned",
+                    "does not exist",
+                    "not found",
+                    "access",
+                    "permission",
+                    "not supported",
+                    "unavailable",
+                )
+            )
         )
-    if res.status_code != 200:
+        if is_model_fallback_eligible:
+            continue
         raise HTTPException(status_code=res.status_code, detail=res.text)
 
-    data = res.json()
-    reply = data["choices"][0]["message"]["content"]
-    return {"reply": reply, "model": selected_model}
+    raise HTTPException(status_code=last_error_status, detail=last_error_detail)
