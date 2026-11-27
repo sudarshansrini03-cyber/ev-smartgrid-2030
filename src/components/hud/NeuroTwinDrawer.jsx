@@ -292,7 +292,7 @@ export default function NeuroTwinDrawer({
   });
   const [memories, setMemories] = useState(() => loadMemories());
   const [selectedModel, setSelectedModel] = useState(() => loadSavedModel());
-  const [autoSwitchedVision, setAutoSwitchedVision] = useState(false);
+  const [autoSwitchedToVision, setAutoSwitchedToVision] = useState(false);
 
   const [input, setInput] = useState('');
   const [attachedImage, setAttachedImage] = useState(null); // { name, dataUrl }
@@ -485,8 +485,10 @@ export default function NeuroTwinDrawer({
     try {
       const compressedDataUrl = await compressImageToJpegBase64(file, 1280, 0.85);
       setAttachedImage({ name: file.name, dataUrl: compressedDataUrl });
-      setSelectedModel(VISION_MODEL_ID);
-      setAutoSwitchedVision(true);
+      if (selectedModel !== VISION_MODEL_ID) {
+        setSelectedModel(VISION_MODEL_ID);
+        setAutoSwitchedToVision(true);
+      }
       setShowAttachMenu(false);
     } catch {
       if (onShowToast) onShowToast('Unable to process screenshot image', 'error');
@@ -555,6 +557,8 @@ export default function NeuroTwinDrawer({
       const currentUserCount = activeThread.messages.filter((m) => m.role === 'user').length;
       if (!retryPayload && currentUserCount >= MAX_USER_MESSAGES) return;
 
+      const shouldResetVision = !retryPayload && Boolean(imgObj) && autoSwitchedToVision;
+
       setErrorBanner('');
       setFailedRequest(null);
       setShowAttachMenu(false);
@@ -595,7 +599,6 @@ export default function NeuroTwinDrawer({
         setInput('');
         setAttachedImage(null);
         setAttachedFile(null);
-        setAutoSwitchedVision(false);
       }
 
       setIsSending(true);
@@ -604,7 +607,7 @@ export default function NeuroTwinDrawer({
       const activeMemories = storedMemories.length > 0 ? storedMemories : memories;
 
       try {
-        const res = await fetch(`${apiBase}/api/chat`, {
+        const fetchPromise = fetch(`${apiBase}/api/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -619,6 +622,14 @@ export default function NeuroTwinDrawer({
             file_name: fileObj?.name || null,
           }),
         });
+
+        // Immediately reset back to Fast after dispatching image request if auto-switched
+        if (shouldResetVision) {
+          setSelectedModel('openai/gpt-oss-20b');
+          setAutoSwitchedToVision(false);
+        }
+
+        const res = await fetchPromise;
 
         const isJson = res.headers.get('content-type')?.includes('application/json');
         const data = isJson ? await res.json() : null;
@@ -677,6 +688,7 @@ export default function NeuroTwinDrawer({
       activeThread,
       attachedFile,
       attachedImage,
+      autoSwitchedToVision,
       extractMemoriesFromMessages,
       isSending,
       memories,
@@ -1225,7 +1237,7 @@ export default function NeuroTwinDrawer({
                             type="button"
                             onClick={() => {
                               setSelectedModel(m.id);
-                              setAutoSwitchedVision(false);
+                              setAutoSwitchedToVision(false);
                               setShowModelMenu(false);
                             }}
                             className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left transition ${
@@ -1256,7 +1268,7 @@ export default function NeuroTwinDrawer({
                   className="rounded-3xl border border-slate-700/70 bg-[#131824] px-3 py-2 shadow-lg focus-within:border-cyan-500/50"
                 >
                   {/* Attachment Preview Chips */}
-                  {(attachedImage || attachedFile || autoSwitchedVision) && (
+                  {(attachedImage || attachedFile || autoSwitchedToVision) && (
                     <div className="mb-2 flex flex-wrap items-center gap-2 px-1">
                       {attachedImage && (
                         <div className="relative flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/90 p-1 pr-2">
@@ -1272,7 +1284,10 @@ export default function NeuroTwinDrawer({
                             type="button"
                             onClick={() => {
                               setAttachedImage(null);
-                              setAutoSwitchedVision(false);
+                              if (autoSwitchedToVision) {
+                                setSelectedModel('openai/gpt-oss-20b');
+                                setAutoSwitchedToVision(false);
+                              }
                             }}
                             className="rounded-full p-0.5 text-slate-400 hover:bg-white/10 hover:text-white"
                           >
@@ -1295,7 +1310,7 @@ export default function NeuroTwinDrawer({
                         </div>
                       )}
 
-                      {autoSwitchedVision && (
+                      {autoSwitchedToVision && (
                         <span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-medium text-cyan-300">
                           Auto-switched to Vision
                         </span>
